@@ -51,9 +51,9 @@ mailx/
 | FR2 | Smart Reply Suggestions | ✅ Working |
 | FR4 | Priority Detection | ✅ Working |
 | FR5 | Task & Deadline Extraction | ✅ Working |
-| FR6 | Follow-Up Reminder System | ⏳ Alarm setup done, Gmail API pending |
+| FR6 | Follow-Up Reminder System | ✅ Implemented; requires Google OAuth/Gmail API configuration |
 | FR9 | AI Email Draft Generation | ✅ Working |
-| FR10 | Mail Statistics Analysis | Schema ready, UI pending |
+| FR10 | Mail Statistics Analysis | ✅ Implemented; requires Google OAuth/Gmail API configuration |
 
 ## Setup for New Team Members
 
@@ -95,7 +95,7 @@ Then configure `~/.config/opencode/opencode.json` or project-level `.opencode/op
 ### 4. Run the Servers
 ```bash
 # Terminal 1: Backend
-cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000
+cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8001
 
 # Terminal 2: Extension dev server
 cd extension && npm run dev
@@ -111,7 +111,7 @@ cd extension && npm run dev
 
 - `cd extension && npm run dev` — Start extension dev server (builds to dist/)
 - `cd extension && npm run build` — Production build
-- `cd backend && uvicorn main:app --reload` — Start backend on port 8000
+- `cd backend && uvicorn main:app --reload --port 8001` — Start backend on port 8001
 - `pip install -r backend/requirements.txt` — Install Python deps
 
 ## Deferred

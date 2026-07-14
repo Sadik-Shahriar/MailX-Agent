@@ -63,9 +63,10 @@ export interface SentThread {
   subject: string;
   recipient: string;
   sentDate: string;
+  hasReply: boolean;
 }
 
-export async function getSentThreadsWithoutReply(days: number): Promise<SentThread[]> {
+export async function getRecentSentThreads(days: number): Promise<SentThread[]> {
   const after = new Date();
   after.setDate(after.getDate() - Math.max(days + 14, 30));
   const list = await gmailFetch(`/threads?q=${encodeURIComponent(`in:sent after:${after.toISOString().slice(0, 10)}`)}&maxResults=100`);
@@ -74,16 +75,15 @@ export async function getSentThreadsWithoutReply(days: number): Promise<SentThre
     const thread = await gmailFetch(`/threads/${item.id}?format=metadata&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`);
     const messages = thread.messages || [];
     const last = messages[messages.length - 1];
-    if (!last || last.labelIds?.includes("SENT")) {
-      const sent = [...messages].reverse().find((message: any) => message.labelIds?.includes("SENT"));
-      if (!sent) continue;
-      threads.push({
-        id: thread.id,
-        subject: header(sent.payload.headers, "Subject") || "(no subject)",
-        recipient: header(sent.payload.headers, "To") || "recipient",
-        sentDate: header(sent.payload.headers, "Date") || new Date(Number(sent.internalDate)).toISOString(),
-      });
-    }
+    const sent = [...messages].reverse().find((message: any) => message.labelIds?.includes("SENT"));
+    if (!sent || !last) continue;
+    threads.push({
+      id: thread.id,
+      subject: header(sent.payload.headers, "Subject") || "(no subject)",
+      recipient: header(sent.payload.headers, "To") || "recipient",
+      sentDate: header(sent.payload.headers, "Date") || new Date(Number(sent.internalDate)).toISOString(),
+      hasReply: !last.labelIds?.includes("SENT"),
+    });
   }
   return threads;
 }

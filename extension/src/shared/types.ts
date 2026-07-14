@@ -9,6 +9,31 @@ export interface EmailContext {
 export interface UserPreferences {
   reply_tone: "formal" | "casual" | "professional";
   reminder_delay_days: number;
+  reminder_notify_before: boolean;
+  reminder_notify_due: boolean;
+  reminder_notify_overdue: boolean;
+  spam_whitelist: string[];
+  spam_blacklist: string[];
+  phishing_sensitivity: "low" | "default" | "high";
+  phishing_allowlist: string[];
+}
+
+export interface SpamResult {
+  verdict: "spam" | "not_spam";
+  confidence: number;
+  reason: string;
+  category: "bulk" | "impersonation" | "newsletter" | "normal" | "transactional";
+  source: "rule" | "llm";
+}
+
+export interface UrlVerdict {
+  url: string;
+  hostname: string;
+  verdict: "clean" | "suspicious" | "phishing";
+  confidence: number;
+  reason: string;
+  heuristics: string[];
+  source: "allowlist" | "heuristic" | "llm";
 }
 
 export interface ChatRequest {
@@ -73,7 +98,9 @@ export type MessageType =
   | "GET_STATUS"
   | "SIGN_IN"
   | "SIGN_OUT"
-  | "DEV_SIGN_IN";
+  | "DEV_SIGN_IN"
+  | "CHECK_SPAM"
+  | "CHECK_PHISHING_URL";
 
 export interface ExtensionMessage {
   type: MessageType;
@@ -87,4 +114,5 @@ export interface ExtensionMessage {
   reminder_id?: string;
   period?: 7 | 30 | 90;
   preferences?: Partial<UserPreferences>;
+  url?: string;
 }

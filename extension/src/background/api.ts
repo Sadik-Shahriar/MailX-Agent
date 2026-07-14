@@ -11,6 +11,9 @@ export async function chat(req: ChatRequest): Promise<ChatResponse> {
 
   if (!resp.ok) {
     const text = await resp.text();
+    if (text.includes("LLM API error: 429")) {
+      throw new Error("The AI service is busy. Please try again shortly.");
+    }
     throw new Error(`API error ${resp.status}: ${text}`);
   }
 

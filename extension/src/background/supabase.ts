@@ -27,6 +27,7 @@ export function getSupabaseClient(): SupabaseClient {
         storage: chromeStorageAdapter,
         autoRefreshToken: true,
         persistSession: true,
+        flowType: "pkce",
       },
     });
   }
@@ -55,13 +56,20 @@ export async function getUserId(): Promise<string | null> {
 const defaultPreferences: UserPreferences = {
   reply_tone: "professional",
   reminder_delay_days: 3,
+  reminder_notify_before: true,
+  reminder_notify_due: true,
+  reminder_notify_overdue: false,
+  spam_whitelist: [],
+  spam_blacklist: [],
+  phishing_sensitivity: "default",
+  phishing_allowlist: [],
 };
 
 export async function getPreferences(): Promise<UserPreferences> {
   const userId = await getUserId();
   if (!userId) return defaultPreferences;
   const { data, error } = await getSupabaseClient()
-    .from("preferences").select("reply_tone, reminder_delay_days").eq("user_id", userId).maybeSingle();
+    .from("preferences").select("reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist").eq("user_id", userId).maybeSingle();
   if (error) throw error;
   return { ...defaultPreferences, ...data };
 }
@@ -71,7 +79,7 @@ export async function savePreferences(preferences: Partial<UserPreferences>): Pr
   if (!userId) throw new Error("Sign in with Google to save preferences.");
   const values = { user_id: userId, ...defaultPreferences, ...preferences, updated_at: new Date().toISOString() };
   const { data, error } = await getSupabaseClient().from("preferences")
-    .upsert(values).select("reply_tone, reminder_delay_days").single();
+    .upsert(values).select("reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist").single();
   if (error) throw error;
   return data;
 }
@@ -89,11 +97,26 @@ export async function saveTasks(tasks: Omit<Task, "id" | "status" | "created_at"
   const userId = await getUserId();
   if (!userId) throw new Error("Sign in with Google to save extracted tasks.");
   if (!tasks.length) return [];
-  const { data, error } = await getSupabaseClient().from("tasks").insert(
-    tasks.map((task) => ({ ...task, user_id: userId, status: "pending" }))
+  const supabase = getSupabaseClient();
+  const emailIds = [...new Set(tasks.map((task) => task.email_id))];
+  const { data: existing, error: existingError } = await supabase.from("tasks").select("*")
+    .eq("user_id", userId).in("email_id", emailIds);
+  if (existingError) throw existingError;
+
+  const normalized = (description: string) => description.trim().replace(/\s+/g, " ").toLowerCase();
+  const existingByKey = new Map((existing as Task[]).map((task) => [
+    `${task.email_id}:${normalized(task.description)}`, task,
+  ]));
+  const newTasks = tasks.filter((task) => !existingByKey.has(`${task.email_id}:${normalized(task.description)}`));
+  if (!newTasks.length) {
+    return tasks.map((task) => existingByKey.get(`${task.email_id}:${normalized(task.description)}`)).filter((task): task is Task => Boolean(task));
+  }
+
+  const { data, error } = await supabase.from("tasks").insert(
+    newTasks.map((task) => ({ ...task, user_id: userId, status: "pending" }))
   ).select();
   if (error) throw error;
-  return data as Task[];
+  return [...(data as Task[]), ...tasks.map((task) => existingByKey.get(`${task.email_id}:${normalized(task.description)}`)).filter((task): task is Task => Boolean(task))];
 }
 
 export async function toggleTask(id: string): Promise<Task[]> {
@@ -113,6 +136,7 @@ export async function toggleTask(id: string): Promise<Task[]> {
     status, completed_at: status === "completed" ? new Date().toISOString() : null,
   }).eq("id", id).eq("user_id", userId);
   if (error) throw error;
+  if (status === "completed") await resolveReminders(id, ["task_due_soon", "task_overdue"]);
   return getTasks();
 }
 
@@ -131,6 +155,16 @@ export async function dismissReminder(id: string): Promise<void> {
   if (!userId) throw new Error("Sign in to manage reminders.");
   const { error } = await getSupabaseClient().from("reminders").update({ dismissed: true })
     .eq("id", id).eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function resolveReminders(sourceId: string, types?: string[]): Promise<void> {
+  const userId = await getUserId();
+  if (!userId) return;
+  let query = getSupabaseClient().from("reminders").update({ resolved: true })
+    .eq("user_id", userId).eq("source_id", sourceId).eq("resolved", false);
+  if (types?.length) query = query.in("type", types);
+  const { error } = await query;
   if (error) throw error;
 }
 

@@ -12,7 +12,13 @@ export default function App() {
   const [statsError, setStatsError] = useState("");
   const [period, setPeriod] = useState<7 | 30 | 90>(7);
   const [reminders, setReminders] = useState<any[]>([]);
-  const [preferences, setPreferences] = useState({ reply_tone: "professional", reminder_delay_days: 3 });
+  const [preferences, setPreferences] = useState({
+    reply_tone: "professional",
+    reminder_delay_days: 3,
+    reminder_notify_before: true,
+    reminder_notify_due: true,
+    reminder_notify_overdue: false,
+  });
 
   useEffect(() => {
     checkAuth();
@@ -199,6 +205,9 @@ export default function App() {
           <div>
             <label style={{ display: "block", marginBottom: 12 }}>Reply tone<br /><select value={preferences.reply_tone} onChange={(event) => setPreferences({ ...preferences, reply_tone: event.target.value })}><option value="professional">Professional</option><option value="formal">Formal</option><option value="casual">Casual</option></select></label>
             <label style={{ display: "block", marginBottom: 12 }}>Remind after days<br /><input type="number" min="1" max="30" value={preferences.reminder_delay_days} onChange={(event) => setPreferences({ ...preferences, reminder_delay_days: Number(event.target.value) })} /></label>
+            <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={preferences.reminder_notify_before} onChange={(event) => setPreferences({ ...preferences, reminder_notify_before: event.target.checked })} /> Notify one day before a task is due</label>
+            <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={preferences.reminder_notify_due} onChange={(event) => setPreferences({ ...preferences, reminder_notify_due: event.target.checked })} /> Notify when a task is due</label>
+            <label style={{ display: "block", marginBottom: 12 }}><input type="checkbox" checked={preferences.reminder_notify_overdue} onChange={(event) => setPreferences({ ...preferences, reminder_notify_overdue: event.target.checked })} /> Notify when a task is overdue</label>
             <button onClick={saveCurrentPreferences} style={{ padding: "6px 12px", border: 0, borderRadius: 4, background: "#1a73e8", color: "white", cursor: "pointer" }}>Save settings</button>
           </div>
         )}

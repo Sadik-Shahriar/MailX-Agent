@@ -4,6 +4,28 @@ import { ExtensionMessage, Task } from "../shared/types";
 import { getOrSetCache } from "../shared/cache";
 import { signInWithGoogle, devSignIn, signOut, getSession, getPreferences, getTasks, saveTasks, toggleTask, getReminders, dismissReminder, savePreferences } from "./supabase";
 import { getStats } from "./stats";
+import { checkSpam } from "./spam";
+import { checkUrl } from "./phishing";
+
+// Free LLM providers become unreliable with an unbounded burst, but a single
+// queue makes a conversation wait behind older inbox jobs. Keep two in flight.
+let activeAiRequests = 0;
+const pendingAiRequests: (() => void)[] = [];
+
+function enqueueAi<T>(work: () => Promise<T>, interactive = false): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const run = () => {
+      activeAiRequests += 1;
+      work().then(resolve, reject).finally(() => {
+        activeAiRequests -= 1;
+        pendingAiRequests.shift()?.();
+      });
+    };
+    if (activeAiRequests < 2) run();
+    else if (interactive) pendingAiRequests.unshift(run);
+    else pendingAiRequests.push(run);
+  });
+}
 
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener(
@@ -46,7 +68,9 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
         history: msg.history,
         preferences: await getPreferences(),
       };
-      const response = cacheKey ? await getOrSetCache(cacheKey, () => chat(request), 30 * 60 * 1000) : await chat(request);
+      const response = cacheKey
+        ? await getOrSetCache(cacheKey, () => enqueueAi(() => chat(request)), 30 * 60 * 1000)
+        : await enqueueAi(() => chat(request), msg.type === "CHAT");
       if (msg.type === "EXTRACT_TASKS" && msg.email_context) {
         const parsed = parseTasks(response.response, msg.email_context);
         const tasks = await saveTasks(parsed);
@@ -62,6 +86,16 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
     case "TOGGLE_TASK": {
       if (!msg.task_id) throw new Error("Missing task ID.");
       return { tasks: await toggleTask(msg.task_id) };
+    }
+
+    case "CHECK_SPAM": {
+      if (!msg.email_context) throw new Error("Open an email before checking it.");
+      return { spam: await enqueueAi(() => checkSpam(msg.email_context!, getPreferences())) };
+    }
+
+    case "CHECK_PHISHING_URL": {
+      if (!msg.url) throw new Error("Missing URL.");
+      return { verdict: await enqueueAi(() => checkUrl(msg.url!, getPreferences())) };
     }
 
     case "GET_REMINDERS": return { reminders: await getReminders() };

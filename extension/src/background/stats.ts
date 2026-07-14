@@ -11,9 +11,9 @@ export interface MailStats {
 }
 
 export async function getStats(period: 7 | 30 | 90): Promise<MailStats> {
-  return getOrSetCache(`stats:${period}`, async () => {
-    const userId = await getUserId();
-    if (!userId) throw new Error("Sign in to view statistics.");
+  const userId = await getUserId();
+  if (!userId) throw new Error("Sign in to view statistics.");
+  return getOrSetCache(`stats:${userId}:${period}`, async () => {
     const start = new Date();
     start.setDate(start.getDate() - period);
     const date = start.toISOString().slice(0, 10);

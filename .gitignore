@@ -5,5 +5,6 @@ env
 __pycache__/
 *.pyc
 .opencode/
+extension/.agents/
 .DS_Store
 *.log
