@@ -45,7 +45,7 @@ export interface Task {
   due_date: string | null;
   priority: "high" | "medium" | "low";
   status: "pending" | "completed" | "dismissed";
-  created_at: number;
+  created_at: string | number;
   email_subject?: string;
   email_sender?: string;
 }
@@ -65,6 +65,11 @@ export type MessageType =
   | "CHAT"
   | "GET_TASKS"
   | "TOGGLE_TASK"
+  | "GET_REMINDERS"
+  | "DISMISS_REMINDER"
+  | "GET_STATS"
+  | "GET_PREFERENCES"
+  | "SAVE_PREFERENCES"
   | "GET_STATUS"
   | "SIGN_IN"
   | "SIGN_OUT"
@@ -79,4 +84,7 @@ export interface ExtensionMessage {
   conversation_id?: string;
   history?: ChatMessage[];
   email?: string;
+  reminder_id?: string;
+  period?: 7 | 30 | 90;
+  preferences?: Partial<UserPreferences>;
 }

@@ -1,6 +1,6 @@
 import { ChatRequest, ChatResponse } from "../shared/types";
 
-const BACKEND_URL = "http://localhost:8000";
+const BACKEND_URL = "http://localhost:8001";
 
 export async function chat(req: ChatRequest): Promise<ChatResponse> {
   const resp = await fetch(`${BACKEND_URL}/chat`, {

@@ -1,4 +1,6 @@
-import { getOrSetCache } from "../shared/cache";
+import { getCache, setCache } from "../shared/cache";
+import { getSentThreadsWithoutReply } from "./gmail";
+import { getPreferences, getTasks, upsertReminder } from "./supabase";
 
 const REMINDER_CHECK_INTERVAL = 60; // minutes
 const DEFAULT_REMINDER_DAYS = 3;
@@ -11,9 +13,10 @@ export function setupReminderAlarm(): void {
 
 export async function handleReminderCheck(): Promise<void> {
   const reminders: string[] = [];
+  const preferences = await getPreferences();
 
   // Check tasks due soon/overdue
-  const tasks = await getTasksFromStorage();
+  const tasks = await getTasks();
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -25,21 +28,27 @@ export async function handleReminderCheck(): Promise<void> {
     const dueDate = new Date(task.due_date);
     if (dueDate <= today) {
       reminders.push(`Task overdue: "${task.description}" was due ${task.due_date}`);
+      await upsertReminder({ type: "task_overdue", source_id: task.id, subject: task.description });
     } else if (dueDate <= tomorrow) {
       reminders.push(`Task due soon: "${task.description}" is due tomorrow`);
+      await upsertReminder({ type: "task_due_soon", source_id: task.id, subject: task.description });
     }
   }
 
   // Check sent emails with no reply
-  const sentThreads = await getSentThreadsNoReply();
+  const sentThreads = await getSentThreadsWithoutReply(preferences.reminder_delay_days);
   for (const thread of sentThreads) {
     const days = Math.floor(
       (Date.now() - new Date(thread.sentDate).getTime()) / 86400000
     );
-    if (days >= DEFAULT_REMINDER_DAYS) {
+    if (days >= preferences.reminder_delay_days) {
       reminders.push(
         `No reply from ${thread.recipient} about "${thread.subject}" (${days} days)`
       );
+      await upsertReminder({
+        type: "sent_no_reply", source_id: thread.id, subject: thread.subject,
+        recipient_name: thread.recipient, sent_date: thread.sentDate,
+      });
     }
   }
 
@@ -54,7 +63,7 @@ export async function handleReminderCheck(): Promise<void> {
   if (reminders.length > 0) {
     const cacheKey = "last_reminder_hash";
     const hash = await simpleHash(reminders.join("|"));
-    const lastHash = await getOrSetCache(cacheKey, async () => "", 60 * 60 * 1000);
+    const lastHash = await getCache<string>(cacheKey);
     if (hash !== lastHash) {
       await chrome.notifications.create({
         type: "basic",
@@ -63,19 +72,9 @@ export async function handleReminderCheck(): Promise<void> {
         message: `${reminders.length} item${reminders.length > 1 ? "s" : ""} need attention`,
         contextMessage: reminders.slice(0, 3).join("\n"),
       });
-      await chrome.storage.session.set({ [cacheKey]: hash });
+      await setCache(cacheKey, hash, 60 * 60 * 1000);
     }
   }
-}
-
-async function getTasksFromStorage(): Promise<any[]> {
-  const result = await chrome.storage.local.get("tasks");
-  return result.tasks || [];
-}
-
-async function getSentThreadsNoReply(): Promise<any[]> {
-  // Placeholder: will integrate with Gmail API
-  return [];
 }
 
 async function simpleHash(str: string): Promise<string> {

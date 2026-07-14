@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 
-type Tab = "inbox" | "stats" | "followups";
+type Tab = "inbox" | "stats" | "followups" | "settings";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("inbox");
@@ -8,6 +8,11 @@ export default function App() {
   const [userEmail, setUserEmail] = useState("");
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState("");
+  const [stats, setStats] = useState<any>(null);
+  const [statsError, setStatsError] = useState("");
+  const [period, setPeriod] = useState<7 | 30 | 90>(7);
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [preferences, setPreferences] = useState({ reply_tone: "professional", reminder_delay_days: 3 });
 
   useEffect(() => {
     checkAuth();
@@ -57,6 +62,33 @@ export default function App() {
       setIsLoggedIn(false);
       setUserEmail("");
     });
+  }
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (activeTab === "stats") loadStats();
+    if (activeTab === "followups") loadReminders();
+    if (activeTab === "settings") chrome.runtime.sendMessage({ type: "GET_PREFERENCES" }, (data) => data && setPreferences(data));
+  }, [activeTab, isLoggedIn, period]);
+
+  function loadStats() {
+    setStatsError("");
+    chrome.runtime.sendMessage({ type: "GET_STATS", period }, (data) => {
+      if (data?.error) setStatsError(data.error);
+      else setStats(data);
+    });
+  }
+
+  function loadReminders() {
+    chrome.runtime.sendMessage({ type: "GET_REMINDERS" }, (data) => setReminders(data?.reminders || []));
+  }
+
+  function dismissReminder(id: string) {
+    chrome.runtime.sendMessage({ type: "DISMISS_REMINDER", reminder_id: id }, loadReminders);
+  }
+
+  function saveCurrentPreferences() {
+    chrome.runtime.sendMessage({ type: "SAVE_PREFERENCES", preferences });
   }
 
   if (loading) {
@@ -139,18 +171,35 @@ export default function App() {
         )}
         {activeTab === "stats" && (
           <div>
-            <p style={{ color: "#6b7280" }}>Mail statistics dashboard</p>
-            <p style={{ color: "#9ca3af", fontSize: 12, marginTop: 8 }}>
-              Coming soon &mdash; sender scores, reply rates, email volume
-            </p>
+            <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+              {[7, 30, 90].map((days) => <button key={days} onClick={() => setPeriod(days as 7 | 30 | 90)} style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 4, padding: 5, background: period === days ? "#1f2937" : "white", color: period === days ? "white" : "#374151" }}>Last {days}d</button>)}
+            </div>
+            {statsError && <p style={{ color: "#dc2626", fontSize: 12 }}>{statsError}</p>}
+            {!stats && !statsError && <p style={{ color: "#9ca3af" }}>Loading statistics...</p>}
+            {stats && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <Score label="Emails sent" value={stats.sent} />
+              <Score label="Emails received" value={stats.received} />
+              <Score label="Tasks completed" value={stats.completedTasks} />
+              <Score label="Tasks pending" value={stats.pendingTasks} />
+              <Score label="Important senders" value={stats.highPrioritySenders} />
+            </div>}
           </div>
         )}
         {activeTab === "followups" && (
           <div>
-            <p style={{ color: "#6b7280" }}>Follow-up reminders</p>
-            <p style={{ color: "#9ca3af", fontSize: 12, marginTop: 8 }}>
-              Coming soon &mdash; auto-reminders for emails needing replies
-            </p>
+            {!reminders.length && <p style={{ color: "#9ca3af" }}>No follow-ups need attention.</p>}
+            {reminders.map((reminder) => <div key={reminder.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "8px 0" }}>
+              <strong style={{ display: "block" }}>{reminder.subject}</strong>
+              <span style={{ color: "#6b7280", fontSize: 11 }}>{reminder.type.replaceAll("_", " ")}</span>
+              <button onClick={() => dismissReminder(reminder.id)} style={{ float: "right", border: 0, background: "transparent", color: "#1a73e8", cursor: "pointer" }}>Dismiss</button>
+            </div>)}
+          </div>
+        )}
+        {activeTab === "settings" && (
+          <div>
+            <label style={{ display: "block", marginBottom: 12 }}>Reply tone<br /><select value={preferences.reply_tone} onChange={(event) => setPreferences({ ...preferences, reply_tone: event.target.value })}><option value="professional">Professional</option><option value="formal">Formal</option><option value="casual">Casual</option></select></label>
+            <label style={{ display: "block", marginBottom: 12 }}>Remind after days<br /><input type="number" min="1" max="30" value={preferences.reminder_delay_days} onChange={(event) => setPreferences({ ...preferences, reminder_delay_days: Number(event.target.value) })} /></label>
+            <button onClick={saveCurrentPreferences} style={{ padding: "6px 12px", border: 0, borderRadius: 4, background: "#1a73e8", color: "white", cursor: "pointer" }}>Save settings</button>
           </div>
         )}
         <div style={{ marginTop: 16, textAlign: "center" }}>
@@ -182,6 +231,7 @@ function TabBar({ activeTab, onTabChange }: {
     { id: "inbox", label: "Inbox" },
     { id: "stats", label: "Stats" },
     { id: "followups", label: "Follow-Ups" },
+    { id: "settings", label: "Settings" },
   ];
 
   return (
@@ -207,4 +257,8 @@ function TabBar({ activeTab, onTabChange }: {
       ))}
     </div>
   );
+}
+
+function Score({ label, value }: { label: string; value: number }) {
+  return <div style={{ background: "#f3f4f6", borderRadius: 6, padding: 10 }}><strong style={{ display: "block", fontSize: 19 }}>{value}</strong><span style={{ color: "#6b7280", fontSize: 11 }}>{label}</span></div>;
 }
