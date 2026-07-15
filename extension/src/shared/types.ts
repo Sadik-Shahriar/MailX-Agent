@@ -9,6 +9,31 @@ export interface EmailContext {
 export interface UserPreferences {
   reply_tone: "formal" | "casual" | "professional";
   reminder_delay_days: number;
+  reminder_notify_before: boolean;
+  reminder_notify_due: boolean;
+  reminder_notify_overdue: boolean;
+  spam_whitelist: string[];
+  spam_blacklist: string[];
+  phishing_sensitivity: "low" | "default" | "high";
+  phishing_allowlist: string[];
+}
+
+export interface SpamResult {
+  verdict: "spam" | "not_spam";
+  confidence: number;
+  reason: string;
+  category: "bulk" | "impersonation" | "newsletter" | "normal" | "transactional";
+  source: "rule" | "llm";
+}
+
+export interface UrlVerdict {
+  url: string;
+  hostname: string;
+  verdict: "clean" | "suspicious" | "phishing";
+  confidence: number;
+  reason: string;
+  heuristics: string[];
+  source: "allowlist" | "heuristic" | "llm";
 }
 
 export interface ChatRequest {
@@ -45,7 +70,7 @@ export interface Task {
   due_date: string | null;
   priority: "high" | "medium" | "low";
   status: "pending" | "completed" | "dismissed";
-  created_at: number;
+  created_at: string | number;
   email_subject?: string;
   email_sender?: string;
 }
@@ -65,10 +90,17 @@ export type MessageType =
   | "CHAT"
   | "GET_TASKS"
   | "TOGGLE_TASK"
+  | "GET_REMINDERS"
+  | "DISMISS_REMINDER"
+  | "GET_STATS"
+  | "GET_PREFERENCES"
+  | "SAVE_PREFERENCES"
   | "GET_STATUS"
   | "SIGN_IN"
   | "SIGN_OUT"
-  | "DEV_SIGN_IN";
+  | "DEV_SIGN_IN"
+  | "CHECK_SPAM"
+  | "CHECK_PHISHING_URL";
 
 export interface ExtensionMessage {
   type: MessageType;
@@ -79,4 +111,8 @@ export interface ExtensionMessage {
   conversation_id?: string;
   history?: ChatMessage[];
   email?: string;
+  reminder_id?: string;
+  period?: 7 | 30 | 90;
+  preferences?: Partial<UserPreferences>;
+  url?: string;
 }

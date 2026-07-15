@@ -7,11 +7,12 @@
     "storage",
     "alarms",
     "notifications",
-    "identity"
+    "identity",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "https://mail.google.com/*",
-    "http://localhost:8000/*",
+    "http://localhost:8001/*",
     "https://akespqwzlrsajibjheqg.supabase.co/*"
   ],
   "background": {
@@ -23,6 +24,12 @@
       "matches": ["https://mail.google.com/*"],
       "js": ["src/content/index.ts"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["public/icons/mailx-logo.png"],
+      "matches": ["https://mail.google.com/*"]
     }
   ],
   "action": {

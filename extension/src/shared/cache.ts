@@ -5,7 +5,9 @@ export async function getCache<T>(key: string): Promise<T | null> {
     const result = await chrome.storage.session.get(
       `${SESSION_CACHE_PREFIX}${key}`
     );
-    return result[`${SESSION_CACHE_PREFIX}${key}`] ?? null;
+    const entry = result[`${SESSION_CACHE_PREFIX}${key}`] as { value: T; expires?: number } | undefined;
+    if (!entry || (entry.expires && entry.expires <= Date.now())) return null;
+    return entry.value;
   } catch {
     return null;
   }
@@ -30,11 +32,9 @@ export async function getOrSetCache<T>(
   fetchFn: () => Promise<T>,
   ttlMs?: number
 ): Promise<T> {
-  const cached = await getCache<{ value: T; expires?: number }>(key);
-  if (cached && (!cached.expires || cached.expires > Date.now())) {
-    return cached.value;
-  }
+  const cached = await getCache<T>(key);
+  if (cached !== null) return cached;
   const value = await fetchFn();
-  await setCache(key, { value }, ttlMs);
+  await setCache(key, value, ttlMs);
   return value;
 }

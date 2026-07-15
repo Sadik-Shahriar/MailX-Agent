@@ -1,10 +1,31 @@
-import { ExtensionMessage, EmailContext } from "../shared/types";
+import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
 
 (function () {
   if (window.location.hostname !== "mail.google.com") return;
 
   let overlayShadow: ShadowRoot | null = null;
-  let floatingBar: HTMLElement | null = null;
+  let actionPanel: HTMLElement | null = null;
+  let activeActionButton: HTMLButtonElement | null = null;
+  let panelIdleTimer: number | null = null;
+  let lastAutoPriorityKey = "";
+  let lastAutoSpamKey = "";
+  let lastAutoSafetyKey = "";
+  let pendingAutoPriorityKey = "";
+  let pendingAutoSpamKey = "";
+  let pendingAutoSafetyKey = "";
+  let statusSourceButton: HTMLButtonElement | null = null;
+  interface ConversationState {
+    conversationId: string;
+    history: ChatTurn[];
+    pending: boolean;
+    pendingPrompt?: string;
+  }
+  type ChatTurn = ChatMessage & { isReply?: boolean; draft?: DraftData };
+  const conversations = new Map<string, ConversationState>();
+  const MAX_CONVERSATIONS = 3;
+  const MAX_CHAT_MESSAGES = 10;
+  const PANEL_COLLAPSED_KEY = "mailx_panel_collapsed";
+  const PANEL_IDLE_MS = 45_000;
 
   function init(): void {
     const root = document.createElement("div");
@@ -12,16 +33,20 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
     overlayShadow = root.attachShadow({ mode: "closed" });
     document.body.appendChild(root);
 
-    createBadge();
-    createToolbar();
+    addPanelStyles();
+    addMessageToolbarStyles();
+    syncActionPanel();
+    window.addEventListener("resize", () => {
+      if (actionPanel) clampPanelToViewport(actionPanel);
+    });
 
     setInterval(() => {
-      const hash = window.location.hash;
-      const hasEmail = /\/[a-zA-Z0-9_-]{10,}/.test(hash);
-      if (floatingBar) {
-        floatingBar.style.display = hasEmail ? "flex" : "none";
-      }
+      syncActionPanel();
+      scanInboxForPriority();
     }, 1000);
+    new MutationObserver(() => {
+      syncMessageToolbar();
+    }).observe(document.body, { childList: true, subtree: true });
 
     chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
       if (msg.type === "RENDER_RESULT") renderResult(msg.data);
@@ -30,103 +55,668 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
     });
   }
 
-  function createBadge(): void {
-    const badge = document.createElement("div");
-    badge.textContent = "MailX";
-    Object.assign(badge.style, {
-      position: "fixed",
-      top: "4px",
-      right: "4px",
-      zIndex: "99999",
-      background: "#1f2937",
-      color: "white",
-      padding: "2px 8px",
-      borderRadius: "4px",
-      fontSize: "11px",
-      fontWeight: "600",
-      fontFamily: "system-ui, sans-serif",
-      opacity: "0.7",
-    });
-    document.body.appendChild(badge);
+  function addPanelStyles(): void {
+    if (!overlayShadow) return;
+
+    const style = document.createElement("style");
+    style.textContent = `
+      #mailx-action-panel {
+        --mx-bg: #ffffff;
+        --mx-surface: #f8fafc;
+        --mx-text: #172033;
+        --mx-muted: #5d6b82;
+        --mx-border: #d7e1f1;
+        --mx-primary: #1a73e8;
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 2147483646;
+        box-sizing: border-box;
+         width: min(380px, calc(100vw - 24px));
+         max-height: min(680px, calc(100dvh - 24px));
+         display: flex;
+         flex-direction: column;
+        overflow: hidden;
+         border: 1px solid var(--mx-border);
+         border-radius: 12px;
+          background: var(--mx-bg);
+         box-shadow: 0 4px 10px rgba(30, 64, 115, 0.14), 0 14px 34px rgba(30, 64, 115, 0.22);
+          color: var(--mx-text);
+         font-family: Arial, sans-serif;
+          transition: opacity 160ms ease, transform 180ms ease, border-radius 180ms ease, box-shadow 180ms ease;
+      }
+
+      .mailx-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+         padding: 11px 12px;
+        background: linear-gradient(135deg, #eff6ff, #f8fbff);
+        border-bottom: 1px solid #e6edf8;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+      }
+
+      .mailx-panel-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .mailx-panel-logo {
+        width: 26px;
+        height: 26px;
+        flex: 0 0 auto;
+        object-fit: contain;
+      }
+
+      .mailx-panel-copy {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .mailx-panel-title {
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.1px;
+      }
+
+      .mailx-panel-subtitle {
+        color: #5d6b82;
+        font-size: 11px;
+      }
+
+      .mailx-minimize {
+        width: 28px;
+        height: 28px;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        color: #516078;
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+      }
+
+      .mailx-minimize:hover { background: #e4eefc; }
+
+        .mailx-panel-content {
+          min-height: 0;
+          flex: 1;
+          max-height: min(620px, calc(100dvh - 82px));
+          padding: 12px;
+          opacity: 1;
+          overflow-y: auto;
+          overflow-x: hidden;
+          transition: max-height 260ms ease, padding 260ms ease, opacity 180ms ease;
+        }
+        .mailx-actions { min-width: 0; }
+        .mailx-email-actions { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e6edf8; }
+        #mailx-action-panel.has-result { width: min(380px, calc(100vw - 24px)); max-width: calc(100vw - 24px); }
+        #mailx-action-panel.has-result .mailx-panel-content {
+          display: block;
+          max-height: min(620px, calc(100dvh - 82px));
+        }
+        #mailx-action-panel.has-result .mailx-actions { display: none; }
+        .mailx-action-group-title { margin: 2px 0 6px; color: var(--mx-muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+        .mailx-general-actions, .mailx-primary-actions, .mailx-secondary-actions { display: grid; gap: 6px; }
+        .mailx-primary-actions {
+         grid-template-columns: 1fr;
+      }
+
+        .mailx-secondary-actions {
+         margin-top: 8px;
+      }
+
+       .mailx-action {
+         display: flex;
+         flex-direction: row;
+         align-items: center;
+        justify-content: center;
+         min-height: 44px;
+        border: 1px solid #d8e2f0;
+         border-radius: 8px;
+         background: var(--mx-bg);
+        color: #24334d;
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+        transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+      }
+
+      .mailx-action:hover:not(:disabled) {
+        border-color: #8ab4f8;
+        background: #f5f9ff;
+        transform: translateY(-1px);
+      }
+
+      .mailx-action:disabled { cursor: wait; opacity: 0.7; }
+       .mailx-primary-action { padding: 9px 10px; }
+       .mailx-secondary-action {
+         min-height: 40px;
+         align-items: center;
+          padding: 7px 10px;
+         font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+       }
+
+       .mailx-action-label { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+       .mailx-action-description {
+         margin: 0 0 0 auto;
+        color: #66758c;
+        font-size: 10px;
+        line-height: 1.3;
+      }
+
+       #mailx-action-panel.is-collapsed .mailx-panel-content {
+         max-height: 0;
+         padding-top: 0;
+         padding-bottom: 0;
+         opacity: 0;
+       }
+
+       .mailx-priority-action {
+         position: relative;
+         overflow: hidden;
+         transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+       }
+       .mailx-priority-action.mailx-priority-high,
+       .mailx-priority-action.mailx-priority-medium,
+       .mailx-priority-action.mailx-priority-low {
+         color: #ffffff;
+         border-color: transparent;
+         animation: mailx-priority-slide 340ms cubic-bezier(.22, 1, .36, 1);
+       }
+       .mailx-priority-action.mailx-priority-high { background: #d93025; }
+       .mailx-priority-action.mailx-priority-medium { background: #e37400; }
+       .mailx-priority-action.mailx-priority-low { background: #188038; }
+       .mailx-status-safe, .mailx-status-warning, .mailx-status-danger {
+         color: #ffffff;
+         border-color: transparent;
+         animation: mailx-priority-slide 340ms cubic-bezier(.22, 1, .36, 1);
+       }
+       .mailx-status-safe { background: #188038; }
+       .mailx-status-warning { background: #e37400; }
+       .mailx-status-danger { background: #d93025; }
+       @keyframes mailx-priority-slide {
+         from { transform: translateX(-18px); opacity: .25; }
+         to { transform: translateX(0); opacity: 1; }
+       }
+       #mailx-action-panel.is-collapsed {
+        width: 58px;
+        height: 58px;
+        border-color: #9fc1f5;
+         border-radius: 50%;
+         transform: scale(.94);
+      }
+
+      #mailx-action-panel.is-collapsed .mailx-panel-header {
+        height: 58px;
+        padding: 0;
+        justify-content: center;
+        border-bottom: 0;
+      }
+
+      #mailx-action-panel.is-collapsed .mailx-panel-brand { justify-content: center; }
+      #mailx-action-panel.is-collapsed .mailx-panel-copy,
+      #mailx-action-panel.is-collapsed .mailx-minimize { display: none; }
+      #mailx-action-panel.is-collapsed .mailx-panel-logo {
+        width: 32px;
+        height: 32px;
+      }
+
+       #mailx-result { min-width: 0; opacity: 1; transform: translateX(0); animation: mailx-result-in 240ms cubic-bezier(.22, 1, .36, 1); }
+       @keyframes mailx-result-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+
+      @media (max-width: 700px) {
+        #mailx-action-panel {
+          right: 12px;
+          bottom: 12px;
+          width: calc(100vw - 24px);
+          max-width: 360px;
+        }
+
+          #mailx-action-panel.has-result { width: calc(100vw - 24px); }
+         #mailx-action-panel.has-result .mailx-panel-content { grid-template-columns: 1fr; max-height: 620px; }
+      }
+    `;
+    overlayShadow.appendChild(style);
   }
 
-  function createToolbar(): void {
-    floatingBar = document.createElement("div");
-    Object.assign(floatingBar.style, {
-      display: "none",
-      position: "fixed",
-      top: "60px",
-      right: "24px",
-      zIndex: "99999",
-      gap: "4px",
-      padding: "8px 12px",
-      background: "#ffffff",
-      borderRadius: "10px",
-      boxShadow: "0 4px 16px rgba(0,0,0,0.18)",
-      border: "1px solid #e5e7eb",
-      alignItems: "center",
-      flexWrap: "wrap",
+  function syncActionPanel(): void {
+    if (!overlayShadow) return;
+    if (!actionPanel) actionPanel = createActionPanel();
+    const hasOpenEmail = Boolean(document.querySelector(".a3s"));
+    actionPanel.style.display = "block";
+    const emailActions = actionPanel.querySelector<HTMLElement>(".mailx-email-actions");
+    if (emailActions) emailActions.style.display = hasOpenEmail ? "block" : "none";
+    const subtitle = actionPanel.querySelector<HTMLElement>(".mailx-panel-subtitle");
+    if (subtitle) subtitle.textContent = hasOpenEmail ? "AI tools for this email" : "AI email drafting assistant";
+    if (hasOpenEmail) {
+      syncMessageToolbar();
+    }
+  }
+
+  function addMessageToolbarStyles(): void {
+    if (document.getElementById("mailx-message-toolbar-styles")) return;
+    const style = document.createElement("style");
+    style.id = "mailx-message-toolbar-styles";
+    style.textContent = `
+      .mailx-message-toolbar { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; padding:8px; border:1px solid #d7e1f1; border-radius:8px; background:#f8fbff; }
+      .mailx-message-toolbar button { border:1px solid #cbd5e1; border-radius:5px; padding:5px 8px; background:#fff; color:#24334d; cursor:pointer; font:600 11px Arial,sans-serif; transition:transform 160ms ease,background 160ms ease,color 160ms ease; }
+      .mailx-message-toolbar button:hover:not(:disabled) { background:#eef5ff; transform:translateY(-1px); }
+      .mailx-message-toolbar button:disabled { opacity:1; cursor:default; }
+      .mailx-message-toolbar .mailx-status-safe, .mailx-message-toolbar .mailx-status-warning, .mailx-message-toolbar .mailx-status-danger, .mailx-message-toolbar .mailx-status-none, .mailx-message-toolbar .mailx-priority-high, .mailx-message-toolbar .mailx-priority-medium, .mailx-message-toolbar .mailx-priority-low { color:#fff; border-color:transparent; animation:mailx-toolbar-slide 340ms cubic-bezier(.22,1,.36,1); }
+      .mailx-message-toolbar .mailx-status-safe, .mailx-message-toolbar .mailx-priority-low { background:#188038; }
+      .mailx-message-toolbar .mailx-status-warning, .mailx-message-toolbar .mailx-priority-medium { background:#e37400; }
+      .mailx-message-toolbar .mailx-status-danger, .mailx-message-toolbar .mailx-priority-high { background:#d93025; }
+      .mailx-message-toolbar .mailx-status-none { background:#64748b; }
+      @keyframes mailx-toolbar-slide { from { transform:translateX(-14px); opacity:.3; } to { transform:translateX(0); opacity:1; } }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function syncMessageToolbar(): void {
+    const bodies = Array.from(document.querySelectorAll<HTMLElement>(".a3s"))
+      .filter((body) => body.offsetParent !== null);
+    for (const body of bodies) {
+      const card = body.closest<HTMLElement>(".adn.ads, .h7") || body.parentElement;
+      const key = messageKey(body);
+      if (!card || Array.from(card.querySelectorAll<HTMLElement>(".mailx-message-toolbar"))
+        .some((toolbar) => toolbar.dataset.mailxMessage === key)) continue;
+      const toolbar = document.createElement("div");
+      toolbar.className = "mailx-message-toolbar";
+      toolbar.dataset.mailxMessage = key;
+      toolbar.setAttribute("aria-label", "MailX message actions");
+      for (const [action, label] of [["priority", "Priority"], ["spam", "Spam Check"], ["safety", "Link Safety"]]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.mailxAction = action;
+        button.dataset.label = label;
+        button.textContent = label;
+        button.addEventListener("click", () => {
+          if (action === "priority" && button.textContent?.toLowerCase().includes("unavailable")) {
+            retryToolbarPriority(body, toolbar);
+            return;
+          }
+          handleAction(action, button, extractEmailContext(body), body);
+        });
+        toolbar.appendChild(button);
+      }
+      body.parentElement?.insertBefore(toolbar, body);
+      runToolbarChecks(body, toolbar);
+    }
+  }
+
+  function messageKey(body: HTMLElement): string {
+    if (body.dataset.mailxMessageKey) return body.dataset.mailxMessageKey;
+    const card = body.closest<HTMLElement>(".adn.ads, .h7");
+    const key = card?.getAttribute("data-message-id") || card?.id || crypto.randomUUID();
+    body.dataset.mailxMessageKey = key;
+    return key;
+  }
+
+  function isCheckableLink(value: string): boolean {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === "http:" || protocol === "https:";
+    } catch {
+      return false;
+    }
+  }
+
+  function toolbarButton(toolbar: HTMLElement, action: string): HTMLButtonElement | null {
+    return toolbar.querySelector<HTMLButtonElement>(`[data-mailx-action="${action}"]`);
+  }
+
+  function setToolbarStatus(toolbar: HTMLElement, action: string, text: string, status?: "safe" | "warning" | "danger" | "none"): void {
+    const button = toolbarButton(toolbar, action);
+    if (!button) return;
+    button.classList.remove("mailx-status-safe", "mailx-status-warning", "mailx-status-danger", "mailx-status-none", "mailx-priority-high", "mailx-priority-medium", "mailx-priority-low");
+    if (status) button.classList.add(`mailx-status-${status}`);
+    button.textContent = text;
+    // Completed verdicts are informational. Only an unavailable result is retryable.
+    button.disabled = !text.toLowerCase().includes("unavailable");
+  }
+
+  function runToolbarChecks(body: HTMLElement, toolbar: HTMLElement): void {
+    const context = extractEmailContext(body);
+    if (!context || !hasSummarizableContent(context.body)) return;
+
+    setToolbarStatus(toolbar, "priority", "Priority: checking...");
+    chrome.runtime.sendMessage({ type: "CLASSIFY_PRIORITY", email_context: context } as ExtensionMessage, (response) => {
+      const classification = parsePriorityClassification(String(response?.response || ""));
+      if (!classification || classification.confidence < 0.6) {
+        setToolbarStatus(toolbar, "priority", "Priority: unavailable");
+        return;
+      }
+      const button = toolbarButton(toolbar, "priority");
+      if (!button) return;
+      button.classList.remove("mailx-priority-high", "mailx-priority-medium", "mailx-priority-low");
+      void button.offsetWidth;
+      button.classList.add(`mailx-priority-${classification.priority}`);
+      button.textContent = `Priority: ${classification.priority.toUpperCase()}`;
+      button.disabled = true;
     });
 
-    const label = document.createElement("div");
-    label.textContent = "MailX";
-    Object.assign(label.style, {
-      fontWeight: "700",
-      fontSize: "11px",
-      color: "#6b7280",
-      textTransform: "uppercase",
-      letterSpacing: "0.5px",
-      width: "100%",
-      marginBottom: "4px",
+    setToolbarStatus(toolbar, "spam", "Spam: checking...");
+    chrome.runtime.sendMessage({ type: "CHECK_SPAM", email_context: context } as ExtensionMessage, (response) => {
+      const spam = response?.spam;
+      if (!spam) {
+        setToolbarStatus(toolbar, "spam", "Spam: unavailable");
+        return;
+      }
+      setToolbarStatus(toolbar, "spam", spam.verdict === "spam" ? "Spam: SPAM" : "Spam: SAFE", spam.verdict === "spam" ? "danger" : "safe");
     });
-    floatingBar.appendChild(label);
 
-    const buttons = [
-      { id: "summarize", label: "Summarize", emoji: "📝" },
-      { id: "reply", label: "Smart Reply", emoji: "💬" },
-      { id: "draft", label: "Draft", emoji: "✏️" },
-      { id: "priority", label: "Priority", emoji: "🏷️" },
-      { id: "tasks", label: "Tasks", emoji: "✅" },
-    ];
+    const links = [...body.querySelectorAll<HTMLAnchorElement>("a[href]")]
+      .map((link) => link.href).filter(isCheckableLink).filter((url, index, values) => values.indexOf(url) === index).slice(0, 10);
+    if (!links.length) {
+      setToolbarStatus(toolbar, "safety", "Links: NO LINK", "none");
+      return;
+    }
+    setToolbarStatus(toolbar, "safety", "Links: checking...");
+    Promise.all(links.map((url) => new Promise<any>((resolve) => chrome.runtime.sendMessage(
+      { type: "CHECK_PHISHING_URL", url } as ExtensionMessage, resolve
+    )))).then((results) => {
+      if (results.some((result) => result?.error || !result?.verdict)) {
+        setToolbarStatus(toolbar, "safety", "Links: unavailable");
+        return;
+      }
+      const harmful = results.some((result) => result?.verdict?.verdict !== "clean");
+      setToolbarStatus(toolbar, "safety", harmful ? "Links: HARMFUL" : "Links: SAFE", harmful ? "danger" : "safe");
+    }).catch(() => setToolbarStatus(toolbar, "safety", "Links: unavailable"));
+  }
 
-    for (const b of buttons) {
-      const btn = document.createElement("button");
-      btn.textContent = `${b.emoji} ${b.label}`;
-      Object.assign(btn.style, {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: "6px 12px",
-        cursor: "pointer",
-        borderRadius: "6px",
-        fontSize: "12px",
-        fontWeight: "500",
-        color: "#374151",
-        background: "#f3f4f6",
-        border: "1px solid #d1d5db",
-        whiteSpace: "nowrap",
-        transition: "background 0.15s",
-        fontFamily: "system-ui, sans-serif",
-      });
-      btn.addEventListener("mouseenter", () => {
-        btn.style.background = "#e5e7eb";
-      });
-      btn.addEventListener("mouseleave", () => {
-        btn.style.background = "#f3f4f6";
-      });
-      btn.addEventListener("click", () => handleAction(b.id));
-      floatingBar.appendChild(btn);
+  function retryToolbarPriority(body: HTMLElement, toolbar: HTMLElement): void {
+    const context = extractEmailContext(body);
+    if (!context || !hasSummarizableContent(context.body)) return;
+    setToolbarStatus(toolbar, "priority", "Priority: checking...");
+    chrome.runtime.sendMessage({ type: "CLASSIFY_PRIORITY", email_context: context } as ExtensionMessage, (response) => {
+      const classification = parsePriorityClassification(String(response?.response || ""));
+      if (!classification || classification.confidence < 0.6) {
+        setToolbarStatus(toolbar, "priority", "Priority: unavailable");
+        return;
+      }
+      const button = toolbarButton(toolbar, "priority");
+      if (!button) return;
+      button.classList.remove("mailx-priority-high", "mailx-priority-medium", "mailx-priority-low");
+      void button.offsetWidth;
+      button.classList.add(`mailx-priority-${classification.priority}`);
+      button.textContent = `Priority: ${classification.priority.toUpperCase()}`;
+      button.disabled = true;
+    });
+  }
+
+  function createActionPanel(): HTMLElement {
+    const panel = document.createElement("section");
+    panel.id = "mailx-action-panel";
+    panel.setAttribute("aria-label", "MailX email assistant");
+
+    const header = document.createElement("div");
+    header.className = "mailx-panel-header";
+    const brand = document.createElement("div");
+    brand.className = "mailx-panel-brand";
+
+    const logo = document.createElement("img");
+    logo.className = "mailx-panel-logo";
+    logo.src = chrome.runtime.getURL("public/icons/mailx-logo.png");
+    logo.alt = "MailX";
+    brand.appendChild(logo);
+
+    const copy = document.createElement("div");
+    copy.className = "mailx-panel-copy";
+    const title = document.createElement("span");
+    title.className = "mailx-panel-title";
+    title.textContent = "MailX";
+    const subtitle = document.createElement("span");
+    subtitle.className = "mailx-panel-subtitle";
+    subtitle.textContent = "AI tools for this email";
+    copy.append(title, subtitle);
+    brand.appendChild(copy);
+    header.appendChild(brand);
+
+    const minimize = document.createElement("button");
+    minimize.className = "mailx-minimize";
+    minimize.type = "button";
+    minimize.textContent = "-";
+    minimize.title = "Minimize MailX";
+    minimize.setAttribute("aria-label", "Minimize MailX");
+    minimize.addEventListener("click", (event) => {
+      event.stopPropagation();
+      setPanelCollapsed(panel, minimize, true);
+    });
+    header.appendChild(minimize);
+    panel.appendChild(header);
+    // Start compact on first use. A saved expanded state is restored below.
+    panel.classList.add("is-collapsed");
+    panel.setAttribute("aria-expanded", "false");
+    minimize.title = "Expand MailX";
+    minimize.setAttribute("aria-label", "Expand MailX");
+    makePanelDraggable(panel, header, () => setPanelCollapsed(panel, minimize, false));
+    for (const eventName of ["pointerdown", "pointermove", "mouseenter", "focusin", "keydown"]) {
+      panel.addEventListener(eventName, () => resetPanelIdleTimer(panel, minimize));
     }
 
-    document.body.appendChild(floatingBar);
+    const content = document.createElement("div");
+    content.className = "mailx-panel-content";
+    const generalActions = document.createElement("div");
+    generalActions.className = "mailx-general-actions";
+    const composeLabel = document.createElement("div");
+    composeLabel.className = "mailx-action-group-title";
+    composeLabel.textContent = "Compose";
+    generalActions.append(
+      composeLabel,
+      createActionButton("draft", "Draft", "Create a new email", true),
+      createActionButton("ask", "Ask MailX", "Give instructions for this email", true)
+    );
+
+    const emailActions = document.createElement("div");
+    emailActions.className = "mailx-email-actions";
+    const emailLabel = document.createElement("div");
+    emailLabel.className = "mailx-action-group-title";
+    emailLabel.textContent = "This email";
+    const primaryActions = document.createElement("div");
+    primaryActions.className = "mailx-primary-actions";
+    primaryActions.append(
+      createActionButton("summarize", "Summarize", "Key facts and next steps", true),
+      createActionButton("reply", "Smart Reply", "Three ready-to-send options", true)
+    );
+
+    const secondaryActions = document.createElement("div");
+    secondaryActions.className = "mailx-secondary-actions";
+    secondaryActions.append(
+      createActionButton("tasks", "Tasks", "", false)
+    );
+
+    emailActions.append(emailLabel, primaryActions, secondaryActions);
+    const actions = document.createElement("div");
+    actions.className = "mailx-actions";
+    actions.append(generalActions, emailActions);
+     content.appendChild(actions);
+    panel.appendChild(content);
+    overlayShadow?.appendChild(panel);
+    void restorePanelState(panel, minimize);
+    resetPanelIdleTimer(panel, minimize);
+    return panel;
   }
 
-  function handleAction(action: string): void {
-    const ctx = extractEmailContext();
+  function setPanelCollapsed(
+    panel: HTMLElement, minimize: HTMLButtonElement, collapsed: boolean
+  ): void {
+    panel.classList.toggle("is-collapsed", collapsed);
+    panel.setAttribute("aria-expanded", String(!collapsed));
+    minimize.title = collapsed ? "Expand MailX" : "Minimize MailX";
+    minimize.setAttribute("aria-label", minimize.title);
+    void chrome.storage.local.set({ [PANEL_COLLAPSED_KEY]: collapsed });
+    if (collapsed && panelIdleTimer !== null) {
+      window.clearTimeout(panelIdleTimer);
+      panelIdleTimer = null;
+    }
+    if (!collapsed) resetPanelIdleTimer(panel, minimize);
+    clampPanelToViewport(panel);
+  }
+
+  async function restorePanelState(panel: HTMLElement, minimize: HTMLButtonElement): Promise<void> {
+    const stored = await chrome.storage.local.get(PANEL_COLLAPSED_KEY);
+    if (stored[PANEL_COLLAPSED_KEY] === false) setPanelCollapsed(panel, minimize, false);
+  }
+
+  function resetPanelIdleTimer(panel: HTMLElement, minimize: HTMLButtonElement): void {
+    if (panelIdleTimer !== null) window.clearTimeout(panelIdleTimer);
+    if (panel.classList.contains("is-collapsed") || panel.classList.contains("has-result")) return;
+    panelIdleTimer = window.setTimeout(() => {
+      setPanelCollapsed(panel, minimize, true);
+      panelIdleTimer = null;
+    }, PANEL_IDLE_MS);
+  }
+
+  function clampPanelToViewport(panel: HTMLElement): void {
+    const bounds = panel.getBoundingClientRect();
+    const maxLeft = Math.max(8, window.innerWidth - bounds.width - 8);
+    const maxTop = Math.max(8, window.innerHeight - bounds.height - 8);
+    const left = Math.min(Math.max(8, bounds.left), maxLeft);
+    const top = Math.min(Math.max(8, bounds.top), maxTop);
+
+    if (Math.abs(bounds.left - left) > 0.5 || Math.abs(bounds.top - top) > 0.5) {
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+    }
+  }
+
+  function makePanelDraggable(
+    panel: HTMLElement, handle: HTMLElement, onCollapsedPanelClick: () => void
+  ): void {
+    let pointerId: number | null = null;
+    let offsetX = 0;
+    let offsetY = 0;
+    let moved = false;
+
+    handle.addEventListener("pointerdown", (event) => {
+      if (
+        (event.pointerType === "mouse" && event.button !== 0) ||
+        (event.target instanceof Element && event.target.closest("button"))
+      ) return;
+
+      const bounds = panel.getBoundingClientRect();
+      pointerId = event.pointerId;
+      offsetX = event.clientX - bounds.left;
+      offsetY = event.clientY - bounds.top;
+      moved = false;
+      panel.classList.add("is-dragging");
+      handle.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+
+    handle.addEventListener("pointermove", (event) => {
+      if (pointerId !== event.pointerId) return;
+
+      const bounds = panel.getBoundingClientRect();
+      const maxLeft = Math.max(8, window.innerWidth - bounds.width - 8);
+      const maxTop = Math.max(8, window.innerHeight - bounds.height - 8);
+      const left = Math.min(Math.max(8, event.clientX - offsetX), maxLeft);
+      const top = Math.min(Math.max(8, event.clientY - offsetY), maxTop);
+      if (Math.abs(event.clientX - offsetX - bounds.left) > 3 ||
+          Math.abs(event.clientY - offsetY - bounds.top) > 3) moved = true;
+
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+    });
+
+    const stopDragging = (event: PointerEvent) => {
+      if (pointerId !== event.pointerId) return;
+      const shouldExpand = event.type === "pointerup" &&
+        panel.classList.contains("is-collapsed") && !moved;
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      pointerId = null;
+      panel.classList.remove("is-dragging");
+      if (shouldExpand) onCollapsedPanelClick();
+      window.setTimeout(() => { moved = false; }, 0);
+    };
+    handle.addEventListener("pointerup", stopDragging);
+    handle.addEventListener("pointercancel", stopDragging);
+  }
+
+  function createActionButton(
+    action: string, label: string, description: string, primary: boolean
+  ): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `mailx-action ${primary ? "mailx-primary-action" : "mailx-secondary-action"}`;
+    button.dataset.label = label;
+    button.dataset.action = action;
+    button.setAttribute("aria-label", label);
+
+    const labelElement = document.createElement("span");
+    labelElement.className = "mailx-action-label";
+    labelElement.textContent = label;
+    button.appendChild(labelElement);
+
+    if (description) {
+      const descriptionElement = document.createElement("span");
+      descriptionElement.className = "mailx-action-description";
+      descriptionElement.textContent = description;
+      button.appendChild(descriptionElement);
+    }
+
+    button.addEventListener("click", () => handleAction(action, button));
+    return button;
+  }
+
+  function handleAction(action: string, button: HTMLButtonElement, contextOverride?: EmailContext | null, bodyElement?: HTMLElement): void {
+    if (activeActionButton) return;
+
+    const ctx = contextOverride || extractEmailContext();
+    statusSourceButton = button.dataset.mailxAction ? button : null;
+    if (action === "draft") {
+      renderDraftComposer(ctx || { id: "", sender: "", subject: "", body: "" });
+      return;
+    }
     if (!ctx) {
       showToast("Open an email with a conversation thread");
       return;
     }
+    if (action === "ask") {
+      renderChatComposer(ctx);
+      return;
+    }
+    if (action === "summarize" && !hasSummarizableContent(ctx.body)) {
+      showToast("MailX could not find email body text to summarize");
+      return;
+    }
+
+    if (action === "safety") {
+      setActionLoading(button, true);
+      const links = [...(bodyElement || getLatestVisibleEmailBody())?.querySelectorAll<HTMLAnchorElement>('a[href]') || []]
+        .map((link) => link.href).filter(isCheckableLink).filter((url, index, all) => all.indexOf(url) === index).slice(0, 20);
+      Promise.all(links.map((url) => new Promise<any>((resolve) => chrome.runtime.sendMessage(
+        { type: "CHECK_PHISHING_URL", url } as ExtensionMessage, resolve
+      )))).then((results) => {
+        setActionLoading(button, false);
+        const toolbar = button.closest<HTMLElement>(".mailx-message-toolbar");
+        if (toolbar) {
+          if (!links.length) setToolbarStatus(toolbar, "safety", "Links: NO LINK", "none");
+          else if (results.some((result) => result?.error || !result?.verdict)) setToolbarStatus(toolbar, "safety", "Links: unavailable");
+          else if (results.some((result) => result.verdict.verdict !== "clean")) setToolbarStatus(toolbar, "safety", "Links: HARMFUL", "danger");
+          else setToolbarStatus(toolbar, "safety", "Links: SAFE", "safe");
+        }
+        const flagged = results.map((result) => result?.verdict).filter((verdict) => verdict && verdict.verdict !== "clean");
+        if (!button.dataset.mailxAction) {
+          renderResult({ text: flagged.length ? flagged.map((item) => `${item.verdict.toUpperCase()}: ${item.hostname} - ${item.reason}`).join("\n") : "No suspicious links found in this email.", intent: "safety" });
+        }
+      }).catch(() => { setActionLoading(button, false); showToast("MailX could not check these links"); });
+      return;
+    }
+
+    const prompt = undefined;
+    setActionLoading(button, true);
 
     const typeMap: Record<string, string> = {
       summarize: "SUMMARIZE",
@@ -134,11 +724,17 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
       draft: "GENERATE_DRAFT",
       priority: "CLASSIFY_PRIORITY",
       tasks: "EXTRACT_TASKS",
+      spam: "CHECK_SPAM",
     };
 
     chrome.runtime.sendMessage(
-      { type: typeMap[action], email_context: ctx } as ExtensionMessage,
+      { type: typeMap[action], email_context: ctx, prompt } as ExtensionMessage,
       (response) => {
+        setActionLoading(button, false);
+        if (chrome.runtime.lastError) {
+          showToast(chrome.runtime.lastError.message || "MailX could not complete the request");
+          return;
+        }
         if (response?.error) {
           showToast(response.error);
           return;
@@ -147,15 +743,47 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
           typeof response?.response === "string"
             ? response.response
             : JSON.stringify(response?.response);
-        renderResult({ text, actions: response?.actions });
+        if (action === "priority") setPriorityButton(text);
+        const spam = response?.spam;
+        if (spam && button.dataset.mailxAction) {
+          const toolbar = button.closest<HTMLElement>(".mailx-message-toolbar");
+          if (toolbar) setToolbarStatus(toolbar, "spam", spam.verdict === "spam" ? "Spam: SPAM" : "Spam: SAFE", spam.verdict === "spam" ? "danger" : "safe");
+        }
+        if (button.dataset.mailxAction && ["priority", "spam"].includes(action)) return;
+        renderResult({ text: spam ? `${spam.verdict === "spam" ? "Possible spam" : "No spam warning"}: ${spam.reason}` : text, actions: response?.actions, intent: action, tasks: response?.tasks });
       }
     );
   }
 
-  function extractEmailContext(): EmailContext | null {
+  function setActionLoading(button: HTMLButtonElement, loading: boolean): void {
+    button.disabled = loading;
+    if (loading) {
+      activeActionButton = button;
+      if (button.dataset.mailxAction) {
+        const toolbar = button.closest<HTMLElement>(".mailx-message-toolbar");
+        const labels: Record<string, string> = {
+          priority: "Priority: checking...",
+          spam: "Spam: checking...",
+          safety: "Links: checking...",
+        };
+        const label = labels[button.dataset.mailxAction];
+        if (toolbar && label) {
+          setToolbarStatus(toolbar, button.dataset.mailxAction, label);
+          return;
+        }
+      }
+      setButtonLabel(button, "Working...");
+      return;
+    }
+
+    activeActionButton = null;
+    setButtonLabel(button, button.dataset.label || "MailX");
+  }
+
+  function extractEmailContext(bodyElement = getLatestVisibleEmailBody()): EmailContext | null {
     const hash = window.location.hash;
     const m = hash.match(/#[^/]+\/([a-zA-Z0-9_-]+)/);
-    if (!m) return null;
+    let id = m?.[1] || hash || "current-email";
 
     let subject = "";
     let sender = "";
@@ -164,17 +792,366 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
     const h2 = document.querySelector("h2");
     if (h2) subject = h2.textContent || "";
 
-    const emailAttr = document.querySelector("[email]");
-    const mailto = document.querySelector('[href^="mailto:"]');
-    const gD = document.querySelector(".gD");
+    const latestBody = bodyElement;
+    const messageCard = latestBody?.closest<HTMLElement>(".adn.ads, .h7");
+    if (latestBody) id = messageKey(latestBody);
+    const emailAttr = messageCard?.querySelector("[email]") || document.querySelector("[email]");
+    const mailto = messageCard?.querySelector('[href^="mailto:"]') || document.querySelector('[href^="mailto:"]');
+    const gD = messageCard?.querySelector(".gD") || document.querySelector(".gD");
     if (emailAttr) sender = emailAttr.getAttribute("email") || "";
     else if (mailto) sender = mailto.getAttribute("href")?.replace("mailto:", "") || "";
     else if (gD) sender = gD.textContent || "";
 
-    const a3s = document.querySelector(".a3s");
-    if (a3s) body = a3s.textContent?.trim() || "";
+    body = extractCurrentEmailBody(latestBody);
 
-    return { id: m[1], sender, subject, body };
+    return { id, sender, subject, body };
+  }
+
+  function autoClassifyOpenEmail(): void {
+    const context = extractEmailContext();
+    if (!context || !hasSummarizableContent(context.body)) return;
+    const key = `${context.id}:${context.sender}:${context.subject}`;
+    if (key === lastAutoPriorityKey || key === pendingAutoPriorityKey || activeActionButton) return;
+    statusSourceButton = null;
+    pendingAutoPriorityKey = key;
+    setCheckingButton("priority", "Priority");
+
+    chrome.runtime.sendMessage(
+      { type: "CLASSIFY_PRIORITY", email_context: context } as ExtensionMessage,
+      (response) => {
+        pendingAutoPriorityKey = "";
+        if (chrome.runtime.lastError || response?.error) {
+          resetStatusButton("priority", "Priority");
+          return;
+        }
+        lastAutoPriorityKey = key;
+        setPriorityButton(typeof response?.response === "string" ? response.response : "");
+      }
+    );
+  }
+
+  function setPriorityButton(text: string): void {
+    const classification = parsePriorityClassification(text);
+    if (!classification || classification.confidence < 0.6) return;
+    forEachActionButton("priority", (button) => {
+      button.classList.remove("mailx-priority-high", "mailx-priority-medium", "mailx-priority-low");
+      void button.offsetWidth;
+      button.classList.add(`mailx-priority-${classification.priority}`);
+      setButtonLabel(button, `Priority: ${classification.priority.toUpperCase()}`);
+      button.title = `${classification.priority[0].toUpperCase()}${classification.priority.slice(1)} priority`;
+      button.disabled = true;
+    });
+  }
+
+  function forEachActionButton(action: string, callback: (button: HTMLButtonElement) => void): void {
+    const panelButton = actionPanel?.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
+    if (panelButton) callback(panelButton);
+    if (statusSourceButton?.dataset.mailxAction === action) callback(statusSourceButton);
+  }
+
+  function setButtonLabel(button: HTMLButtonElement, value: string): void {
+    const label = button.querySelector<HTMLElement>(".mailx-action-label");
+    if (label) label.textContent = value;
+    else button.textContent = value;
+  }
+
+  function setStatusButton(action: string, labelText: string, status: "safe" | "warning" | "danger", title: string): void {
+    forEachActionButton(action, (button) => {
+      button.classList.remove("mailx-status-safe", "mailx-status-warning", "mailx-status-danger");
+      void button.offsetWidth;
+      button.classList.add(`mailx-status-${status}`);
+      setButtonLabel(button, labelText);
+      button.title = title;
+    });
+  }
+
+  function setCheckingButton(action: string, labelText: string): void {
+    forEachActionButton(action, (button) => {
+      button.classList.remove("mailx-status-safe", "mailx-status-warning", "mailx-status-danger");
+      setButtonLabel(button, `${labelText}: checking...`);
+      button.title = `${labelText} check in progress`;
+    });
+  }
+
+  function resetStatusButton(action: string, labelText: string): void {
+    forEachActionButton(action, (button) => {
+      button.classList.remove("mailx-status-safe", "mailx-status-warning", "mailx-status-danger");
+      setButtonLabel(button, labelText);
+      button.title = `${labelText} could not be completed automatically`;
+    });
+  }
+
+  function autoCheckSpam(): void {
+    const context = extractEmailContext();
+    if (!context || !hasSummarizableContent(context.body)) return;
+    const key = `${context.id}:${context.sender}:${context.subject}`;
+    if (key === lastAutoSpamKey || key === pendingAutoSpamKey || activeActionButton) return;
+    statusSourceButton = null;
+    pendingAutoSpamKey = key;
+    setCheckingButton("spam", "Spam");
+    chrome.runtime.sendMessage({ type: "CHECK_SPAM", email_context: context } as ExtensionMessage, (response) => {
+      pendingAutoSpamKey = "";
+      if (chrome.runtime.lastError || response?.error || !response?.spam) {
+        resetStatusButton("spam", "Spam Check");
+        return;
+      }
+      lastAutoSpamKey = key;
+      const spam = response.spam;
+      setStatusButton("spam", spam.verdict === "spam" ? "Spam: SPAM" : "Spam: SAFE", spam.verdict === "spam" ? "danger" : "safe", spam.reason || "Spam check complete");
+    });
+  }
+
+  function autoCheckLinkSafety(): void {
+    const context = extractEmailContext();
+    const links = [...getLatestVisibleEmailBody()?.querySelectorAll<HTMLAnchorElement>("a[href]") || []]
+      .map((link) => link.href).filter(isCheckableLink).filter((url, index, all) => all.indexOf(url) === index).slice(0, 10);
+    if (!context) return;
+    const key = `${context.id}:${links.join("|")}`;
+    if (key === lastAutoSafetyKey || key === pendingAutoSafetyKey || activeActionButton) return;
+    statusSourceButton = null;
+    if (!links.length) {
+      lastAutoSafetyKey = key;
+      setStatusButton("safety", "Links: SAFE", "safe", "No links to check");
+      return;
+    }
+    pendingAutoSafetyKey = key;
+    setCheckingButton("safety", "Links");
+    Promise.all(links.map((url) => new Promise<any>((resolve) => chrome.runtime.sendMessage(
+      { type: "CHECK_PHISHING_URL", url } as ExtensionMessage, resolve
+    )))).then((results) => {
+      pendingAutoSafetyKey = "";
+      if (results.some((result) => result?.error)) {
+        resetStatusButton("safety", "Link Safety");
+        return;
+      }
+      lastAutoSafetyKey = key;
+      const verdicts = results.map((result) => result?.verdict).filter(Boolean);
+      const phishing = verdicts.find((verdict) => verdict.verdict === "phishing");
+      const suspicious = verdicts.find((verdict) => verdict.verdict === "suspicious");
+      if (phishing) setStatusButton("safety", "Links: PHISHING", "danger", phishing.reason);
+      else if (suspicious) setStatusButton("safety", "Links: CAUTION", "warning", suspicious.reason);
+      else setStatusButton("safety", "Links: SAFE", "safe", "No suspicious links found");
+    }).catch(() => { pendingAutoSafetyKey = ""; resetStatusButton("safety", "Link Safety"); });
+  }
+
+  function hasSummarizableContent(body: string): boolean {
+    return (body.match(/[A-Za-z0-9\u0080-\uFFFF]/g) || []).length >= 2;
+  }
+
+  function getLatestVisibleEmailBody(): HTMLElement | undefined {
+    const bodies = Array.from(document.querySelectorAll<HTMLElement>(".a3s"))
+      .filter((element) => element.offsetParent !== null);
+    // Gmail lays conversation messages vertically. The lowest visible card is
+    // the newest expanded message and is the only content sent to MailX.
+    return bodies.sort((left, right) => right.getBoundingClientRect().top - left.getBoundingClientRect().top)[0];
+  }
+
+  function extractCurrentEmailBody(bodyElement = getLatestVisibleEmailBody()): string {
+    if (!bodyElement) return "";
+
+    // Gmail nests prior messages and signatures inside the current email body.
+    const body = bodyElement.cloneNode(true) as HTMLElement;
+    body.querySelectorAll(
+      "blockquote, .gmail_quote, [class*='gmail_quote'], .gmail_signature, [data-smartmail='gmail_signature']"
+    ).forEach((element) => element.remove());
+    return trimQuotedEmailText(body.textContent || "");
+  }
+
+  function trimQuotedEmailText(text: string): string {
+    const quoteMarkers = [
+      /^\s*On .+ wrote:\s*$/im,
+      /^\s*-{2,}\s*Forwarded message\s*-{2,}\s*$/im,
+    ];
+    let end = text.length;
+
+    for (const marker of quoteMarkers) {
+      const match = marker.exec(text);
+      if (match?.index !== undefined) end = Math.min(end, match.index);
+    }
+
+    const signature = /\n--\s*\n/.exec(text);
+    if (signature?.index !== undefined) end = Math.min(end, signature.index);
+
+    return text.slice(0, end).replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  function chatKey(context: EmailContext): string {
+    return `${context.id}:${context.sender}:${context.subject}`;
+  }
+
+  function conversationFor(context: EmailContext): ConversationState {
+    const key = chatKey(context);
+    const existing = conversations.get(key);
+    if (existing) {
+      conversations.delete(key);
+      conversations.set(key, existing);
+      return existing;
+    }
+    const state = { conversationId: crypto.randomUUID(), history: [], pending: false };
+    conversations.set(key, state);
+    while (conversations.size > MAX_CONVERSATIONS) conversations.delete(conversations.keys().next().value!);
+    return state;
+  }
+
+  function renderChatComposer(context: EmailContext, draft = "", error = ""): void {
+    if (!overlayShadow || !actionPanel) return;
+    overlayShadow.querySelector("#mailx-result")?.remove();
+    const state = conversationFor(context);
+    const container = document.createElement("div");
+    container.id = "mailx-result";
+    container.style.cssText = "position:relative;min-width:0;padding:14px;background:#fff;border-radius:9px;color:#172033;font:13px system-ui,sans-serif;";
+    const title = document.createElement("strong");
+    title.textContent = "Ask MailX";
+    const back = document.createElement("button");
+    back.textContent = "Back";
+    back.style.cssText = "float:right;border:0;background:transparent;color:#1a73e8;cursor:pointer;font-size:12px;";
+    back.onclick = () => { container.remove(); actionPanel?.classList.remove("has-result"); };
+    const subtitle = document.createElement("p");
+    subtitle.textContent = "Ask about this message or refine a reply using your own instructions.";
+    subtitle.style.cssText = "margin:5px 0 9px;color:#5d6b82;font-size:12px;";
+    const transcript = document.createElement("div");
+    transcript.style.cssText = "max-height:220px;overflow:auto;margin-bottom:9px;padding-right:2px;";
+    for (const message of state.history) {
+      const row = document.createElement("div");
+      const isUser = message.role === "user";
+      row.style.cssText = `margin:7px 0;padding:8px;border-radius:7px;white-space:pre-wrap;border:1px solid ${isUser ? "#93c5fd" : "#c4b5fd"};background:${isUser ? "#dbeafe" : "#ede9fe"};color:${isUser ? "#1e3a8a" : "#4c1d95"};`;
+      const speaker = document.createElement("strong");
+      speaker.textContent = isUser ? "You" : "MailX";
+      speaker.style.cssText = "display:block;margin-bottom:3px;font-size:11px;";
+      const text = document.createElement("span");
+      appendBoldMarkdown(text, message.content);
+      row.append(speaker, text);
+      if (message.role === "assistant" && message.draft) {
+        const insert = document.createElement("button");
+        insert.textContent = "Insert draft into Gmail";
+        insert.style.cssText = "display:block;margin-top:7px;padding:4px 7px;border:1px solid #8b5cf6;border-radius:4px;background:#fff;color:#5b21b6;cursor:pointer;font-size:11px;";
+        insert.onclick = async () => {
+          if (await insertDraftIntoCompose(message.draft!)) {
+            insert.textContent = "Inserted";
+            insert.disabled = true;
+          } else insert.textContent = "Insert failed";
+        };
+        row.appendChild(insert);
+      } else if (message.role === "assistant" && message.isReply) {
+        const insert = document.createElement("button");
+        insert.textContent = "Insert into Gmail";
+        insert.style.cssText = "display:block;margin-top:7px;padding:4px 7px;border:1px solid #8b5cf6;border-radius:4px;background:#fff;color:#5b21b6;cursor:pointer;font-size:11px;";
+        insert.onclick = async () => {
+          if (await openComposeAndInsert(message.content)) {
+            insert.textContent = "Inserted";
+            insert.disabled = true;
+          } else insert.textContent = "Insert failed";
+        };
+        row.appendChild(insert);
+      }
+      transcript.appendChild(row);
+    }
+    if (state.pendingPrompt) {
+      const pendingUser = document.createElement("div");
+      pendingUser.style.cssText = "margin:7px 0;padding:8px;border-radius:7px;white-space:pre-wrap;border:1px solid #93c5fd;background:#dbeafe;color:#1e3a8a;";
+      const speaker = document.createElement("strong");
+      speaker.textContent = "You";
+      speaker.style.cssText = "display:block;margin-bottom:3px;font-size:11px;";
+      const text = document.createElement("span");
+      appendBoldMarkdown(text, state.pendingPrompt);
+      pendingUser.append(speaker, text);
+      transcript.appendChild(pendingUser);
+    }
+    if (state.pending) {
+      const thinking = document.createElement("div");
+      thinking.textContent = "MailX: Thinking...";
+      thinking.style.cssText = "padding:8px;color:#64748b;";
+      transcript.appendChild(thinking);
+    }
+    // A re-render after sending should keep the newest answer in view.
+    requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
+    const chips = document.createElement("div");
+    chips.style.cssText = "display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;";
+    const input = document.createElement("textarea");
+    input.rows = 3;
+    input.placeholder = "Example: Summarize only the deadlines and what I need to do.";
+    input.value = draft;
+    input.style.cssText = "box-sizing:border-box;width:100%;resize:vertical;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;";
+    for (const eventName of ["pointerdown", "mousedown", "keydown", "keypress", "keyup", "input"]) input.addEventListener(eventName, (event) => event.stopPropagation());
+    for (const text of ["Summarize this", "What needs action?", "Draft a concise reply"]) {
+      const chip = document.createElement("button");
+      chip.textContent = text;
+      chip.style.cssText = "border:1px solid #cbd5e1;background:#fff;border-radius:999px;padding:4px 7px;cursor:pointer;font-size:11px;";
+      chip.disabled = state.pending;
+      chip.onclick = () => { input.value = text; input.focus(); };
+      chips.appendChild(chip);
+    }
+    const errorLine = document.createElement("div");
+    errorLine.textContent = error;
+    errorLine.style.cssText = "min-height:16px;margin-top:4px;color:#b91c1c;font-size:11px;";
+    const send = document.createElement("button");
+    send.textContent = state.pending ? "Thinking..." : "Send";
+    send.disabled = state.pending;
+    send.style.cssText = "margin-top:8px;padding:6px 10px;border:0;border-radius:5px;background:#1a73e8;color:#fff;cursor:pointer;";
+    const clear = document.createElement("button");
+    clear.textContent = "New chat";
+    clear.disabled = state.pending;
+    clear.style.cssText = "margin:8px 0 0 7px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer;";
+    clear.onclick = () => { conversations.delete(chatKey(context)); renderChatComposer(context); };
+    send.onclick = () => {
+      const prompt = input.value.trim();
+      if (!prompt || state.pending) return;
+      state.pending = true;
+      state.pendingPrompt = prompt;
+      renderChatComposer(context);
+      const isDraft = isDraftInstruction(prompt);
+      chrome.runtime.sendMessage({ type: isDraft ? "GENERATE_DRAFT" : "CHAT", email_context: context, prompt, conversation_id: state.conversationId, history: state.history } as ExtensionMessage, (response) => {
+        state.pending = false;
+        state.pendingPrompt = undefined;
+        if (chrome.runtime.lastError || response?.error) {
+          renderChatComposer(context, prompt, response?.error || chrome.runtime.lastError?.message || "MailX could not answer right now.");
+          return;
+        }
+        if (chatKey(extractEmailContext() || context) !== chatKey(context)) return;
+        const answer = String(response?.response || "").trim();
+        if (!answer) {
+          renderChatComposer(context, prompt, "MailX returned an empty response. Please retry.");
+          return;
+        }
+        const draftAnswer = isDraft ? parseDraft(answer) : null;
+        state.history.push(
+          { role: "user", content: prompt },
+          {
+            role: "assistant",
+            content: draftAnswer ? formatDraft(draftAnswer, true) : answer,
+            isReply: isReplyInstruction(prompt),
+            draft: draftAnswer || undefined,
+          }
+        );
+        state.history = state.history.slice(-MAX_CHAT_MESSAGES);
+        renderChatComposer(context);
+      });
+    };
+    container.append(title, back, subtitle, transcript, chips, input, errorLine, send, clear);
+    actionPanel.classList.add("has-result");
+    actionPanel.querySelector(".mailx-panel-content")?.appendChild(container);
+    if (!state.pending) input.focus();
+  }
+
+  function appendBoldMarkdown(container: HTMLElement, value: string): void {
+    const parts = value.split(/(\*\*[^*]+\*\*)/g);
+    for (const part of parts) {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        const bold = document.createElement("strong");
+        bold.textContent = part.slice(2, -2);
+        container.appendChild(bold);
+      } else {
+        container.appendChild(document.createTextNode(part));
+      }
+    }
+  }
+
+  function isReplyInstruction(prompt: string): boolean {
+    return /\b(reply|draft|respond|response|refine)\b/i.test(prompt);
+  }
+
+  function isDraftInstruction(prompt: string): boolean {
+    return /\b(draft|compose|new email|write (?:an )?email|generate (?:an )?email)\b/i.test(prompt);
   }
 
   function renderResult(data: any): void {
@@ -185,30 +1162,126 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
     const container = document.createElement("div");
     container.id = "mailx-result";
     Object.assign(container.style, {
-      position: "fixed",
-      bottom: "24px",
-      right: "24px",
-      width: "380px",
-      maxHeight: "440px",
+      position: "relative",
+      width: "auto",
+      maxHeight: "400px",
       background: "#ffffff",
       borderRadius: "10px",
       boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
       padding: "20px",
-      zIndex: "999999",
       fontFamily: "system-ui, sans-serif",
       fontSize: "13px",
       lineHeight: "1.6",
       color: "#1f2937",
       overflowY: "auto",
     });
+    const closeResult = () => {
+      container.remove();
+      actionPanel?.classList.remove("has-result");
+    };
 
     const content = document.createElement("div");
     content.style.whiteSpace = "pre-wrap";
-    content.textContent =
-      typeof data === "string" ? data : data?.text || JSON.stringify(data);
+    const text = typeof data === "string" ? data : data?.text || JSON.stringify(data);
+    const draft = data?.intent === "draft" ? parseDraft(text) : null;
+    content.textContent = draft ? formatDraft(draft, true) : text;
+    if (data?.intent === "tasks") {
+      content.textContent = data?.tasks?.length
+        ? `Tasks found (${data.tasks.length})`
+        : "No action items were found in this email.";
+      content.style.fontWeight = "700";
+    }
     container.appendChild(content);
 
-    if (data?.actions?.length) {
+    if (data?.intent === "priority") {
+      const match = text.match(/"priority"\s*:\s*"(high|medium|low)"/i);
+      if (match) {
+        content.textContent = `Priority: ${match[1].toUpperCase()}`;
+        content.style.fontWeight = "700";
+        content.style.color = match[1].toLowerCase() === "high" ? "#b91c1c" : match[1].toLowerCase() === "medium" ? "#a16207" : "#15803d";
+      }
+    }
+
+    if (data?.intent === "reply") {
+      const replies = parseReplyOptions(text);
+      if (replies.length) {
+        content.textContent = "Choose a reply:";
+        const replyList = document.createElement("div");
+        replyList.style.marginTop = "10px";
+        for (const [index, reply] of replies.entries()) {
+          const card = document.createElement("div");
+          card.style.cssText = "margin-top:8px;padding:9px;border:1px solid #dbe3ee;border-radius:7px;background:#f8fafc;";
+          const label = document.createElement("strong");
+          label.textContent = `Reply ${index + 1}`;
+          label.style.display = "block";
+          const replyText = document.createElement("div");
+          replyText.textContent = reply;
+          replyText.style.cssText = "margin:4px 0 8px;white-space:pre-wrap;";
+          const copy = document.createElement("button");
+          copy.textContent = "Copy";
+          const insert = document.createElement("button");
+          insert.textContent = "Insert";
+          const refine = document.createElement("button");
+          refine.textContent = "Refine";
+          for (const button of [copy, insert, refine]) {
+            button.style.cssText = "margin-right:6px;padding:4px 9px;border:1px solid #cbd5e1;border-radius:4px;background:white;cursor:pointer;font-size:12px;";
+          }
+          copy.onclick = async () => {
+            const copied = await copyText(reply);
+            copy.textContent = copied ? "Copied" : "Copy failed";
+          };
+          insert.onclick = async () => {
+            insert.disabled = true;
+            insert.textContent = "Opening...";
+            if (await openComposeAndInsert(reply)) closeResult();
+            else {
+              insert.disabled = false;
+              insert.textContent = "Insert";
+              showToast("MailX could not open Gmail compose. Please try again.");
+            }
+          };
+          refine.onclick = () => {
+            const context = extractEmailContext();
+            if (context) renderChatComposer(context, `Refine this selected reply:\n\n${reply}\n\nInstruction: `);
+          };
+          card.append(label, replyText, copy, insert, refine);
+          replyList.appendChild(card);
+        }
+        container.appendChild(replyList);
+      }
+    }
+
+    if (data?.tasks?.length) {
+      const list = document.createElement("div");
+      list.style.marginTop = "12px";
+      for (const task of data.tasks) {
+        const row = document.createElement("label");
+        row.style.display = "block";
+        row.style.marginTop = "8px";
+        row.style.padding = "8px";
+        row.style.border = "1px solid #dbe3ee";
+        row.style.borderRadius = "6px";
+        row.style.background = "#f8fafc";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = task.status === "completed";
+        checkbox.addEventListener("change", () => chrome.runtime.sendMessage({ type: "TOGGLE_TASK", task_id: task.id }));
+        const description = document.createElement("strong");
+        description.textContent = ` ${task.description}`;
+        const details = document.createElement("span");
+        details.style.cssText = "display:block;margin:4px 0 0 20px;color:#64748b;font-size:11px;font-weight:400;";
+        details.textContent = [
+          task.due_date ? `Due: ${task.due_date}` : "No due date",
+          `Priority: ${(task.priority || "medium").toUpperCase()}`,
+          task.assignee && task.assignee !== "me" ? `Assigned to: ${task.assignee}` : "Assigned to: me",
+        ].join(" | ");
+        row.append(checkbox, description, details);
+        list.appendChild(row);
+      }
+      container.appendChild(list);
+    }
+
+    if (data?.actions?.length && data?.intent !== "reply") {
       const div = document.createElement("div");
       Object.assign(div.style, {
         marginTop: "14px",
@@ -230,14 +1303,35 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
           fontSize: "12px",
           color: "#374151",
         });
-        btn.onclick = () => container.remove();
+        btn.onclick = async () => {
+          if (a.action === "copy") {
+            btn.textContent = await copyText(draft ? formatDraft(draft, true) : text) ? "Copied" : "Copy failed";
+          } else if (a.action === "insert") {
+            const inserted = insertIntoCompose(extractInsertText(text, data?.intent));
+            if (inserted) { btn.textContent = "Inserted"; closeResult(); }
+            else showToast("Open a Gmail reply or compose box first");
+          } else {
+            closeResult();
+          }
+        };
         div.appendChild(btn);
       }
       container.appendChild(div);
     }
 
+    if (data?.intent === "draft") {
+      const insert = document.createElement("button");
+      insert.textContent = "Insert into Gmail";
+      Object.assign(insert.style, { marginTop: "12px", padding: "6px 12px", border: "0", borderRadius: "5px", background: "#1a73e8", color: "white", cursor: "pointer" });
+      insert.onclick = async () => {
+        if (draft && await insertDraftIntoCompose(draft)) closeResult();
+        else showToast("Open a Gmail reply or compose box first");
+      };
+      container.appendChild(insert);
+    }
+
     const close = document.createElement("button");
-    close.textContent = "✕";
+    close.textContent = "Back";
     Object.assign(close.style, {
       position: "absolute",
       top: "10px",
@@ -245,15 +1339,67 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
       border: "none",
       background: "none",
       cursor: "pointer",
-      fontSize: "16px",
-      color: "#9ca3af",
-      padding: "2px 6px",
+       fontSize: "12px",
+       color: "#1a73e8",
+       padding: "4px 7px",
       borderRadius: "4px",
     });
-    close.onclick = () => container.remove();
+    close.onclick = closeResult;
     container.appendChild(close);
 
-    overlayShadow.appendChild(container);
+    actionPanel?.classList.add("has-result");
+    actionPanel?.querySelector(".mailx-panel-content")?.appendChild(container);
+  }
+
+  function renderDraftComposer(ctx: EmailContext): void {
+    if (!overlayShadow || !actionPanel) return;
+    overlayShadow.querySelector("#mailx-result")?.remove();
+    const container = document.createElement("div");
+    container.id = "mailx-result";
+    container.style.cssText = "position:relative;min-width:0;padding:16px;background:#fff;border-radius:9px;color:#172033;font:13px system-ui,sans-serif;";
+    const title = document.createElement("strong");
+    title.textContent = "Create an email draft";
+    const hint = document.createElement("p");
+    hint.textContent = "Describe who you are writing to and what you want to say.";
+    hint.style.cssText = "margin:6px 0 10px;color:#5d6b82;font-size:12px;";
+    const input = document.createElement("textarea");
+    input.placeholder = "Example: Write a polite follow-up to Taha about the project report";
+    input.rows = 5;
+    input.style.cssText = "box-sizing:border-box;width:100%;resize:vertical;padding:9px;border:1px solid #cbd5e1;border-radius:6px;font:inherit;line-height:1.4;";
+    // Gmail installs document-level shortcuts. Keep events inside MailX so it
+    // cannot steal typing, Enter, or Backspace from this draft field.
+    for (const eventName of ["pointerdown", "mousedown", "keydown", "keypress", "keyup", "input"]) {
+      input.addEventListener(eventName, (event) => event.stopPropagation());
+    }
+    const error = document.createElement("div");
+    error.style.cssText = "min-height:18px;margin-top:5px;color:#b91c1c;font-size:11px;";
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    const generate = document.createElement("button");
+    generate.textContent = "Generate draft";
+    for (const button of [cancel, generate]) button.style.cssText = "margin-top:8px;padding:6px 10px;border-radius:5px;cursor:pointer;font-size:12px;";
+    cancel.style.cssText += "border:1px solid #cbd5e1;background:#fff;color:#334155;";
+    generate.style.cssText += "margin-left:7px;border:1px solid #1a73e8;background:#1a73e8;color:#fff;";
+    cancel.onclick = () => { container.remove(); actionPanel?.classList.remove("has-result"); };
+    generate.onclick = () => {
+      const prompt = input.value.trim();
+      if (!prompt) { error.textContent = "Enter what you want to draft first."; input.focus(); return; }
+      generate.disabled = true;
+      generate.textContent = "Generating...";
+      chrome.runtime.sendMessage({ type: "GENERATE_DRAFT", email_context: ctx, prompt } as ExtensionMessage, (response) => {
+        if (chrome.runtime.lastError || response?.error) {
+          error.textContent = response?.error || chrome.runtime.lastError?.message || "Could not generate the draft.";
+          generate.disabled = false;
+          generate.textContent = "Generate draft";
+          return;
+        }
+        renderResult({ text: response.response, actions: response.actions, intent: "draft" });
+      });
+    };
+    container.append(title, hint, input, error, cancel, generate);
+    actionPanel.classList.add("has-result");
+    actionPanel.querySelector(".mailx-panel-content")?.appendChild(container);
+    input.focus();
   }
 
   function showToast(msg: string): void {
@@ -275,6 +1421,249 @@ import { ExtensionMessage, EmailContext } from "../shared/types";
     });
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 3000);
+  }
+
+  const classifiedRows = new WeakSet<Element>();
+  const priorityPendingRows = new WeakSet<Element>();
+  let priorityScanInProgress = false;
+  let lastPriorityScanAt = 0;
+
+  function scanInboxForPriority(): void {
+    // One paced request at a time keeps the free provider responsive and stays
+    // below the backend rate limit while eventually covering every visible row.
+    if (document.querySelector(".a3s") || priorityScanInProgress || Date.now() - lastPriorityScanAt < 2_000 || !document.querySelector('tr.zA')) return;
+    priorityScanInProgress = true;
+    lastPriorityScanAt = Date.now();
+    const rows = Array.from(document.querySelectorAll('tr.zA'))
+      .filter((row) => !classifiedRows.has(row) && !priorityPendingRows.has(row)).slice(0, 1);
+    Promise.all(rows.map((row) => classifyInboxRow(row))).finally(() => { priorityScanInProgress = false; });
+  }
+
+  async function classifyInboxRow(row: Element): Promise<void> {
+    priorityPendingRows.add(row);
+    const columns = Array.from(row.querySelectorAll<HTMLElement>('td'));
+    const sender = row.querySelector<HTMLElement>('[email]')?.getAttribute('email') || columns[4]?.textContent?.trim() || "";
+    const subject = row.querySelector<HTMLElement>('.bog')?.textContent?.trim() || "";
+    const snippet = row.querySelector<HTMLElement>('.y2')?.textContent?.trim() || "";
+    if (!subject && !snippet) {
+      classifiedRows.add(row);
+      return;
+    }
+    chrome.runtime.sendMessage({ type: "CLASSIFY_PRIORITY", email_context: {
+      id: row.getAttribute('data-legacy-thread-id') || `${sender}:${subject}`, sender, subject, snippet, body: "",
+    } }, (response) => {
+      const result = typeof response?.response === "string" ? response.response : "";
+      const classification = parsePriorityClassification(result);
+      if (!classification) {
+        priorityPendingRows.delete(row);
+        return;
+      }
+      classifiedRows.add(row);
+      if (classification.confidence < 0.6 || !row.isConnected) return;
+      const badge = document.createElement('span');
+      badge.textContent = classification.priority.toUpperCase();
+      badge.style.cssText = `margin-left:8px;padding:2px 5px;border-radius:9px;font:600 9px Arial;color:#fff;background:${classification.priority === "high" ? "#d93025" : classification.priority === "medium" ? "#f29900" : "#188038"};`;
+      const target = row.querySelector('.bog') || row.querySelector('td');
+      if (target) target.appendChild(badge);
+    });
+  }
+
+  function parsePriorityClassification(text: string): { priority: "high" | "medium" | "low"; confidence: number } | null {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      const value = JSON.parse(match[0]);
+      if (!["high", "medium", "low"].includes(value.priority)) return null;
+      return { priority: value.priority, confidence: Number(value.confidence) || 0 };
+    } catch { return null; }
+  }
+
+  function extractInsertText(text: string, intent: string): string {
+    if (intent !== "draft") return text.replace(/^R\d\s*[:.-]\s*/gim, "").trim();
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return text;
+    try {
+      const draft = JSON.parse(match[0]);
+      return [draft.greeting, draft.body, draft.signOff].filter(Boolean).join("\n\n");
+    } catch { return text; }
+  }
+
+  interface DraftData {
+    to?: string | null;
+    subject?: string;
+    greeting?: string;
+    body?: string;
+    signOff?: string;
+  }
+
+  function parseDraft(text: string): DraftData | null {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      const draft = JSON.parse(match[0]);
+      return draft && typeof draft === "object" ? draft as DraftData : null;
+    } catch { return null; }
+  }
+
+  function formatDraft(draft: DraftData, includeSubject: boolean): string {
+    return [
+      includeSubject && draft.to ? `To: ${draft.to}` : "",
+      includeSubject && draft.subject ? `Subject: ${draft.subject}` : "",
+      draft.greeting || "",
+      draft.body || "",
+      draft.signOff || "",
+    ].filter(Boolean).join("\n\n");
+  }
+
+  function parseReplyOptions(text: string): string[] {
+    const pattern = /(?:^|\n)\s*(?:[-*]\s*)?(?:\*{1,2}\s*)?R([1-3])(?:\s*\([^\n)]*\))?(?:\s*\*{1,2})?\s*[:.-]\s*/gi;
+    const matches = [...text.matchAll(pattern)];
+    const replies = new Map<string, string>();
+    for (const [index, match] of matches.entries()) {
+      const start = (match.index || 0) + match[0].length;
+      const end = index < matches.length - 1 ? matches[index + 1].index || text.length : text.length;
+      const reply = text.slice(start, end).trim();
+      if (reply) replies.set(match[1], `${replies.get(match[1]) ? `${replies.get(match[1])}\n\n` : ""}${reply}`);
+    }
+    return ["1", "2", "3"].map((id) => replies.get(id)).filter((reply): reply is string => Boolean(reply));
+  }
+
+  function getComposeBox(): HTMLElement | undefined {
+    return Array.from(document.querySelectorAll<HTMLElement>('[contenteditable="true"][role="textbox"]'))
+      .filter((element) => element.offsetParent !== null).pop();
+  }
+
+  function insertIntoCompose(text: string, composer = getComposeBox()): boolean {
+    if (!composer) return false;
+    composer.focus();
+    document.execCommand("insertText", false, text);
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    return true;
+  }
+
+  async function copyText(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.cssText = "position:fixed;opacity:0;pointer-events:none;";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copied = document.execCommand("copy");
+      textarea.remove();
+      return copied;
+    }
+  }
+
+  async function openComposeAndInsert(text: string): Promise<boolean> {
+    let composer = getComposeBox();
+    if (composer) return replaceAndInsert(composer, text);
+    const replyButton = Array.from(document.querySelectorAll<HTMLElement>('[data-tooltip="Reply"], [aria-label="Reply"]'))
+      .filter((button) => button.offsetParent !== null).pop();
+    const actionButton = replyButton || document.querySelector<HTMLElement>('[gh="cm"], div[role="button"][data-tooltip^="Compose"]');
+    if (!actionButton) return false;
+    actionButton.click();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 150));
+      composer = getComposeBox();
+      if (composer) return replaceAndInsert(composer, text);
+    }
+    return false;
+  }
+
+  async function insertDraftIntoCompose(draft: DraftData): Promise<boolean> {
+    let composer = getComposeBox();
+    if (!composer) {
+      const composeButton = document.querySelector<HTMLElement>('[gh="cm"], div[role="button"][data-tooltip^="Compose"]');
+      if (!composeButton) return false;
+      composeButton.click();
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+        composer = getComposeBox();
+        if (composer) break;
+      }
+    }
+    if (!composer) return false;
+    if (draft.to && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.to)) {
+      if (!await insertRecipient(draft.to, composer)) return false;
+    }
+    if (!await replaceAndInsert(composer, formatDraft(draft, false))) return false;
+    const composeRoot = composer.closest<HTMLElement>('[role="dialog"], .M9') || document.body;
+    const subject = Array.from(composeRoot.querySelectorAll<HTMLInputElement>('input[name="subjectbox"]'))
+      .filter((input) => input.offsetParent !== null).pop();
+    if (subject && draft.subject) {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setValue?.call(subject, draft.subject);
+      subject.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: draft.subject }));
+    }
+    return true;
+  }
+
+  async function insertRecipient(address: string, composer: HTMLElement): Promise<boolean> {
+    const composeRoot = composer.closest<HTMLElement>('[role="dialog"], .M9') || document.body;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const recipient = Array.from(composeRoot.querySelectorAll<HTMLElement>(
+        'input[peoplekit-id], input[name="to"], input[role="combobox"], [contenteditable="true"][role="combobox"]'
+      )).filter((element) => element.offsetParent !== null).pop();
+      if (recipient) {
+        recipient.focus();
+        if (recipient instanceof HTMLInputElement) {
+          const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+          setValue?.call(recipient, address);
+        } else {
+          document.execCommand("insertText", false, address);
+        }
+        recipient.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: address }));
+        for (const eventName of ["keydown", "keypress", "keyup"]) {
+          recipient.dispatchEvent(new KeyboardEvent(eventName, { bubbles: true, key: "Enter", code: "Enter" }));
+        }
+        return true;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    }
+    return false;
+  }
+
+  async function replaceAndInsert(composer: HTMLElement, text: string): Promise<boolean> {
+    if (composer.textContent?.trim() && !await confirmReplaceDraft()) return false;
+    if (composer.textContent?.trim()) {
+      composer.focus();
+      document.execCommand("selectAll", false);
+      document.execCommand("delete", false);
+      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+    }
+    return insertIntoCompose(text, composer);
+  }
+
+  function confirmReplaceDraft(): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (!overlayShadow) return resolve(false);
+      const backdrop = document.createElement("div");
+      backdrop.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(15,23,42,.35);display:grid;place-items:center;font-family:Arial,sans-serif;";
+      const modal = document.createElement("div");
+      modal.style.cssText = "width:min(330px,calc(100vw - 32px));padding:20px;border-radius:12px;background:#fff;box-shadow:0 16px 40px rgba(15,23,42,.28);color:#172033;";
+      const title = document.createElement("strong");
+      title.textContent = "Replace existing reply?";
+      const message = document.createElement("p");
+      message.textContent = "This reply box already has text. Replace it with the selected MailX reply?";
+      message.style.cssText = "margin:9px 0 16px;color:#52627a;font-size:13px;line-height:1.45;";
+      const cancel = document.createElement("button");
+      cancel.textContent = "Keep my text";
+      const replace = document.createElement("button");
+      replace.textContent = "Replace";
+      for (const button of [cancel, replace]) button.style.cssText = "padding:7px 11px;border-radius:5px;cursor:pointer;font-size:12px;";
+      cancel.style.cssText += "border:1px solid #cbd5e1;background:#fff;color:#334155;";
+      replace.style.cssText += "margin-left:8px;border:1px solid #1a73e8;background:#1a73e8;color:#fff;";
+      const finish = (answer: boolean) => { backdrop.remove(); resolve(answer); };
+      cancel.onclick = () => finish(false);
+      replace.onclick = () => finish(true);
+      backdrop.onclick = (event) => { if (event.target === backdrop) finish(false); };
+      modal.append(title, message, cancel, replace);
+      backdrop.appendChild(modal);
+      overlayShadow.appendChild(backdrop);
+    });
   }
 
   if (document.readyState === "loading") {
