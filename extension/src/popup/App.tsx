@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createStatsRequestGuard } from "./statsRequestGuard";
+import type { Task } from "../shared/types";
 
-type Tab = "inbox" | "stats" | "followups" | "settings";
+type Tab = "inbox" | "tasks" | "stats" | "followups" | "settings";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("inbox");
@@ -14,6 +15,9 @@ export default function App() {
   const [period, setPeriod] = useState<7 | 30 | 90>(7);
   const statsRequests = useRef(createStatsRequestGuard());
   const [reminders, setReminders] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState("");
   const [preferences, setPreferences] = useState({
     reply_tone: "professional",
     reminder_delay_days: 3,
@@ -77,6 +81,7 @@ export default function App() {
   useEffect(() => {
     if (!isLoggedIn) return;
     if (activeTab === "stats") loadStats();
+    if (activeTab === "tasks") loadTasks();
     if (activeTab === "followups") loadReminders();
     if (activeTab === "settings") chrome.runtime.sendMessage({ type: "GET_PREFERENCES" }, (data) => data && setPreferences(data));
   }, [activeTab, isLoggedIn, period]);
@@ -85,7 +90,7 @@ export default function App() {
     const request = statsRequests.current.start();
     setStats(null);
     setStatsError("");
-    chrome.runtime.sendMessage({ type: "GET_STATS", period }, (data) => {
+    chrome.runtime.sendMessage({ type: "GET_STATS", period, refresh: true }, (data) => {
       if (!statsRequests.current.isCurrent(request)) return;
       if (data?.error) setStatsError(data.error);
       else setStats(data);
@@ -94,6 +99,50 @@ export default function App() {
 
   function loadReminders() {
     chrome.runtime.sendMessage({ type: "GET_REMINDERS" }, (data) => setReminders(data?.reminders || []));
+  }
+
+  function loadTasks() {
+    setTasksLoading(true);
+    setTasksError("");
+    chrome.runtime.sendMessage({ type: "GET_TASKS", period }, (data) => {
+      setTasksLoading(false);
+      if (chrome.runtime.lastError || data?.error) {
+        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not load tasks.");
+        return;
+      }
+      setTasks(Array.isArray(data?.tasks) ? data.tasks : []);
+    });
+  }
+
+  function toggleTask(id: string) {
+    chrome.runtime.sendMessage({ type: "TOGGLE_TASK", task_id: id, period }, (data) => {
+      if (chrome.runtime.lastError || data?.error) {
+        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not update task.");
+        return;
+      }
+      if (Array.isArray(data?.tasks)) setTasks(data.tasks);
+    });
+  }
+
+  function deleteCompletedTask(id: string) {
+    chrome.runtime.sendMessage({ type: "DELETE_TASK", task_id: id, period }, (data) => {
+      if (chrome.runtime.lastError || data?.error) {
+        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not delete task.");
+        return;
+      }
+      if (Array.isArray(data?.tasks)) setTasks(data.tasks);
+    });
+  }
+
+  function deleteAllCompletedTasks() {
+    if (!window.confirm("Delete all completed tasks? Their completion history will remain in Statistics.")) return;
+    chrome.runtime.sendMessage({ type: "DELETE_COMPLETED_TASKS", period }, (data) => {
+      if (chrome.runtime.lastError || data?.error) {
+        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not delete completed tasks.");
+        return;
+      }
+      if (Array.isArray(data?.tasks)) setTasks(data.tasks);
+    });
   }
 
   function dismissReminder(id: string) {
@@ -182,6 +231,9 @@ export default function App() {
             </ul>
           </div>
         )}
+        {activeTab === "tasks" && (
+          <TasksView tasks={tasks} period={period} loading={tasksLoading} error={tasksError} onPeriodChange={setPeriod} onToggle={toggleTask} onDelete={deleteCompletedTask} onDeleteAll={deleteAllCompletedTasks} />
+        )}
         {activeTab === "stats" && (
           <div>
             <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
@@ -244,6 +296,7 @@ function TabBar({ activeTab, onTabChange }: {
 }) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "inbox", label: "Inbox" },
+    { id: "tasks", label: "Tasks" },
     { id: "stats", label: "Stats" },
     { id: "followups", label: "Follow-Ups" },
     { id: "settings", label: "Settings" },
@@ -271,6 +324,78 @@ function TabBar({ activeTab, onTabChange }: {
         </button>
       ))}
     </div>
+  );
+}
+
+function TasksView({
+  tasks,
+  period,
+  loading,
+  error,
+  onPeriodChange,
+  onToggle,
+  onDelete,
+  onDeleteAll,
+}: {
+  tasks: Task[];
+  period: 7 | 30 | 90;
+  loading: boolean;
+  error: string;
+  onPeriodChange: (period: 7 | 30 | 90) => void;
+  onToggle: (id: string) => void;
+  onDelete: (id: string) => void;
+  onDeleteAll: () => void;
+}) {
+  const visibleTasks = tasks.filter((task) => task.status === "pending" || task.status === "completed");
+  const pending = visibleTasks.filter((task) => task.status === "pending");
+  const completed = visibleTasks.filter((task) => task.status === "completed");
+
+  if (loading) return <p style={{ color: "#9ca3af" }}>Loading tasks...</p>;
+  if (error) return <p style={{ color: "#dc2626", fontSize: 12 }}>{error}</p>;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+        {[7, 30, 90].map((days) => <button key={days} onClick={() => onPeriodChange(days as 7 | 30 | 90)} style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 4, padding: 5, background: period === days ? "#1f2937" : "white", color: period === days ? "white" : "#374151" }}>{days}d</button>)}
+      </div>
+      {!visibleTasks.length && <p style={{ color: "#9ca3af" }}>No tasks in the last {period} days.</p>}
+      <TaskSection title={`To do (${pending.length})`} tasks={pending} onToggle={onToggle} />
+      <TaskSection title={`Completed (${completed.length})`} tasks={completed} onToggle={onToggle} onDelete={onDelete} onDeleteAll={onDeleteAll} />
+    </div>
+  );
+}
+
+function TaskSection({
+  title,
+  tasks,
+  onToggle,
+  onDelete,
+  onDeleteAll,
+}: {
+  title: string;
+  tasks: Task[];
+  onToggle: (id: string) => void;
+  onDelete?: (id: string) => void;
+  onDeleteAll?: () => void;
+}) {
+  return (
+    <section style={{ marginBottom: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <h2 style={{ fontSize: 13, margin: 0, color: "#374151" }}>{title}</h2>
+        {onDeleteAll && tasks.length > 0 && <button type="button" onClick={onDeleteAll} style={{ border: "1px solid #fecaca", borderRadius: 4, padding: "3px 7px", background: "#fff7f7", color: "#b91c1c", cursor: "pointer", fontSize: 11 }}>Delete all</button>}
+      </div>
+      {!tasks.length && <p style={{ color: "#9ca3af", fontSize: 12 }}>None</p>}
+      {tasks.map((task) => (
+        <label key={task.id} style={{ display: "block", padding: "9px 0", borderBottom: "1px solid #e5e7eb", cursor: "pointer" }}>
+          <input type="checkbox" checked={task.status === "completed"} onChange={() => onToggle(task.id)} />
+          <span style={{ marginLeft: 8, textDecoration: task.status === "completed" ? "line-through" : "none" }}>{task.description}</span>
+          <small style={{ display: "block", margin: "4px 0 0 24px", color: "#6b7280" }}>
+            {task.due_date ? `Due ${task.due_date}` : "No due date"} · {task.priority} priority
+          </small>
+          {task.status === "completed" && onDelete && <button type="button" onClick={(event) => { event.preventDefault(); onDelete(task.id); }} style={{ margin: "6px 0 0 24px", border: "1px solid #fecaca", borderRadius: 4, padding: "3px 7px", background: "#fff7f7", color: "#b91c1c", cursor: "pointer", fontSize: 11 }}>Delete</button>}
+        </label>
+      ))}
+    </section>
   );
 }
 

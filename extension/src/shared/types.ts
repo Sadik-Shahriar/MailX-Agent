@@ -126,6 +126,8 @@ export type MessageType =
   | "CHAT"
   | "GET_TASKS"
   | "TOGGLE_TASK"
+  | "DELETE_TASK"
+  | "DELETE_COMPLETED_TASKS"
   | "GET_REMINDERS"
   | "DISMISS_REMINDER"
   | "GET_STATS"
@@ -149,6 +151,7 @@ export interface ExtensionMessage {
   email?: string;
   reminder_id?: string;
   period?: 7 | 30 | 90;
+  refresh?: boolean;
   preferences?: Partial<UserPreferences>;
   url?: string;
   telemetry?: RequestTelemetry;

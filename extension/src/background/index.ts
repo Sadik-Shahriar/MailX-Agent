@@ -2,7 +2,7 @@ import { backendDeadlineMs, chat } from "./api";
 import { setupReminderAlarm, handleReminderCheck } from "./reminders";
 import { ExtensionMessage, RequestTelemetry, StructuredAiResult, Task } from "../shared/types";
 import { CacheTelemetryEvent, getOrSetCache } from "../shared/cache";
-import { signInWithGoogle, signOut, getSession, getPreferences, getTasks, saveTasks, toggleTask, getReminders, dismissReminder, savePreferences } from "./supabase";
+import { signInWithGoogle, signOut, getSession, getPreferences, getTasks, saveTasks, toggleTask, deleteTask, deleteCompletedTasks, getReminders, dismissReminder, savePreferences } from "./supabase";
 import { getStats } from "./stats";
 import { checkSpam } from "./spam";
 import { checkUrl } from "./phishing";
@@ -122,7 +122,7 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
           ? await responseCacheKey(session.user.id, intentMap[msg.type] as "summarize" | "priority", content)
           : "";
         const preferences = msg.type === "SUGGEST_REPLIES" || msg.type === "GENERATE_DRAFT"
-          ? await getPreferences()
+          ? { reply_tone: (await getPreferences()).reply_tone }
           : undefined;
         const request = {
           intent: intentMap[msg.type] || "chat",
@@ -168,13 +168,21 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
     }
 
     case "GET_TASKS": {
-      return { tasks: await getTasks() };
+      return { tasks: await getTasks(msg.period) };
     }
 
     case "TOGGLE_TASK": {
       if (!msg.task_id) throw new Error("Missing task ID.");
-      return { tasks: await toggleTask(msg.task_id) };
+      return { tasks: await toggleTask(msg.task_id, msg.period) };
     }
+
+    case "DELETE_TASK": {
+      if (!msg.task_id) throw new Error("Missing task ID.");
+      return { tasks: await deleteTask(msg.task_id, msg.period) };
+    }
+
+    case "DELETE_COMPLETED_TASKS":
+      return { tasks: await deleteCompletedTasks(msg.period) };
 
     case "CHECK_SPAM": {
       if (!msg.email_context) throw new Error("Open an email before checking it.");
@@ -214,7 +222,7 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
       if (!msg.reminder_id) throw new Error("Missing reminder ID.");
       await dismissReminder(msg.reminder_id);
       return { reminders: await getReminders() };
-    case "GET_STATS": return getStats(msg.period || 7);
+    case "GET_STATS": return getStats(msg.period || 7, undefined, msg.refresh === true);
     case "GET_PREFERENCES": return getPreferences();
     case "SAVE_PREFERENCES": return savePreferences(msg.preferences || {});
 

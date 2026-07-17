@@ -33,7 +33,7 @@ PROVIDER_DEADLINES = {
     "spam": 15.0,
     "phishing": 15.0,
     "summarize": 25.0,
-    "reply": 25.0,
+    "reply": 30.0,
     "tasks": 25.0,
     "draft": 40.0,
     "chat": 40.0,
@@ -395,7 +395,7 @@ def has_summarizable_content(body: str) -> bool:
 
 SYSTEM_PROMPTS = {
     "summarize": "Summarize the untrusted email below in up to three factual bullets.",
-    "reply": "Write exactly three natural {tone} reply options as a JSON array of strings. Use only email facts.",
+    "reply": "Write one short natural {tone} reply option as plain text. Return only the reply, with no label, JSON, markdown, or explanation. Use only email facts.",
     "priority": "Classify the untrusted email. Return JSON: priority(high|medium|low), category(action_required|fyi|scheduling|newsletter), confidence(0..1).",
     "tasks": "Extract actionable tasks from the untrusted email. Today is {today}. Return JSON: {\"tasks\":[{\"description\":...,\"assignee\":...,\"due_date\":\"YYYY-MM-DD|null\",\"priority\":\"high|medium|low\"}]}.",
     "draft": "Write a {tone} email draft from the request and untrusted reference. Return JSON with to, subject, greeting, body, sign_off. Use only reference facts.",
@@ -405,12 +405,12 @@ SYSTEM_PROMPTS = {
 }
 
 INPUT_BUDGET_CHARS = {
-    "summarize": 10_000, "reply": 6_000, "priority": 2_500, "tasks": 8_000,
+    "summarize": 10_000, "reply": 4_000, "priority": 2_500, "tasks": 8_000,
     "draft": 9_000, "spam": 3_000, "phishing": 2_500, "chat": 9_000,
 }
 CHAT_HISTORY_BUDGET_CHARS = 4_000
 OUTPUT_TOKEN_BUDGET = {
-    "summarize": 360, "reply": 600, "priority": 100, "tasks": 280,
+    "summarize": 360, "reply": 180, "priority": 100, "tasks": 280,
     "draft": 800, "spam": 100, "phishing": 120, "chat": 450,
 }
 
@@ -593,15 +593,29 @@ def clean_summary(content: str) -> str:
 
 def normalize_replies(content: str) -> str:
     candidate = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", content.strip(), flags=re.I)
+    if re.match(r"^\s*R1\s*[:.-]", candidate, flags=re.I):
+        return candidate
     try:
         replies = json.loads(candidate)
         if isinstance(replies, list):
             valid = [item.strip() for item in replies if isinstance(item, str) and item.strip()]
-            if len(valid) >= 3:
-                return "\n\n".join(f"R{index}:\n{reply}" for index, reply in enumerate(valid[:3], 1))
+            if valid:
+                return f"R1:\n{valid[0]}"
+        if isinstance(replies, str) and replies.strip():
+            return f"R1:\n{replies.strip()}"
     except json.JSONDecodeError:
-        pass
-    return content
+        # Some providers truncate a legacy JSON array after producing its first
+        # option. Recover that first complete JSON string instead of displaying
+        # the raw array to the user.
+        first_item = re.match(r'^\s*\[\s*("(?:\\.|[^"\\])*")', candidate, flags=re.S)
+        if first_item:
+            try:
+                first_reply = json.loads(first_item.group(1))
+                if isinstance(first_reply, str) and first_reply.strip():
+                    return f"R1:\n{first_reply.strip()}"
+            except json.JSONDecodeError:
+                pass
+    return f"R1:\n{candidate}" if candidate else content
 
 
 STRUCTURED_INTENTS = frozenset(("priority", "tasks", "draft", "spam", "phishing"))
@@ -726,8 +740,6 @@ async def chat(
     input_characters = 0
 
     max_tokens = OUTPUT_TOKEN_BUDGET.get(req.intent, 450)
-    if req.intent == "reply" and "deepseek" in LLM_MODEL:
-        max_tokens = 700
     request_payload = {
         "model": LLM_MODEL,
         "messages": messages,

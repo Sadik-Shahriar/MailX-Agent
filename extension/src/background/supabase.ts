@@ -138,11 +138,16 @@ export async function savePreferences(preferences: Partial<UserPreferences>): Pr
   return value;
 }
 
-export async function getTasks(): Promise<Task[]> {
+export async function getTasks(period?: 7 | 30 | 90): Promise<Task[]> {
   const userId = await getUserId();
-  if (!userId) return (await chrome.storage.local.get("tasks")).tasks || [];
-  const { data, error } = await getSupabaseClient().from("tasks").select("*")
-    .eq("user_id", userId).order("created_at", { ascending: false });
+  const start = period ? new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString() : undefined;
+  if (!userId) {
+    const tasks = ((await chrome.storage.local.get("tasks")).tasks || []) as Task[];
+    return period ? tasks.filter((task) => new Date(task.created_at).toISOString() >= start!) : tasks;
+  }
+  let query = getSupabaseClient().from("tasks").select("*").eq("user_id", userId);
+  if (start) query = query.gte("created_at", start);
+  const { data, error } = await query.order("created_at", { ascending: false });
   if (error) throw error;
   return data as Task[];
 }
@@ -170,17 +175,18 @@ export async function saveTasks(tasks: Omit<Task, "id" | "status" | "created_at"
     newTasks.map((task) => ({ ...task, user_id: userId, status: "pending" }))
   ).select();
   if (error) throw error;
+  await invalidateUserCache(userId);
   return [...(data as Task[]), ...tasks.map((task) => existingByKey.get(`${task.email_id}:${normalized(task.description)}`)).filter((task): task is Task => Boolean(task))];
 }
 
-export async function toggleTask(id: string): Promise<Task[]> {
+export async function toggleTask(id: string, period?: 7 | 30 | 90): Promise<Task[]> {
   const userId = await getUserId();
   if (!userId) {
     const stored = await chrome.storage.local.get("tasks");
     const tasks = (stored.tasks || []).map((task: Task) => task.id === id
       ? { ...task, status: task.status === "completed" ? "pending" : "completed" } : task);
     await chrome.storage.local.set({ tasks });
-    return tasks;
+    return period ? tasks.filter((task: Task) => new Date(task.created_at).toISOString() >= new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString()) : tasks;
   }
   const { data: task, error: fetchError } = await getSupabaseClient().from("tasks").select("status")
     .eq("id", id).eq("user_id", userId).single();
@@ -190,8 +196,45 @@ export async function toggleTask(id: string): Promise<Task[]> {
     status, completed_at: status === "completed" ? new Date().toISOString() : null,
   }).eq("id", id).eq("user_id", userId);
   if (error) throw error;
-  if (status === "completed") await resolveReminders(id, ["task_due_soon", "task_overdue"]);
-  return getTasks();
+  if (status === "completed") {
+    const { error: historyError } = await getSupabaseClient().rpc("record_task_completion", { p_task_id: id });
+    if (historyError) throw historyError;
+    await resolveReminders(id, ["task_due_soon", "task_overdue"]);
+  }
+  await invalidateUserCache(userId);
+  return getTasks(period);
+}
+
+export async function deleteTask(id: string, period?: 7 | 30 | 90): Promise<Task[]> {
+  const userId = await getUserId();
+  if (!userId) {
+    const tasks = ((await chrome.storage.local.get("tasks")).tasks || []) as Task[];
+    const target = tasks.find((task) => task.id === id);
+    if (!target || target.status !== "completed") throw new Error("Only completed tasks can be deleted.");
+    const remaining = tasks.filter((task) => task.id !== id);
+    await chrome.storage.local.set({ tasks: remaining });
+    return period ? remaining.filter((task) => new Date(task.created_at).toISOString() >= new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString()) : remaining;
+  }
+  const { error } = await getSupabaseClient().from("tasks").delete()
+    .eq("id", id).eq("user_id", userId).eq("status", "completed");
+  if (error) throw error;
+  await invalidateUserCache(userId);
+  return getTasks(period);
+}
+
+export async function deleteCompletedTasks(period?: 7 | 30 | 90): Promise<Task[]> {
+  const userId = await getUserId();
+  if (!userId) {
+    const tasks = ((await chrome.storage.local.get("tasks")).tasks || []) as Task[];
+    const remaining = tasks.filter((task) => task.status !== "completed");
+    await chrome.storage.local.set({ tasks: remaining });
+    return period ? remaining.filter((task) => new Date(task.created_at).toISOString() >= new Date(Date.now() - period * 24 * 60 * 60 * 1000).toISOString()) : remaining;
+  }
+  const { error } = await getSupabaseClient().from("tasks").delete()
+    .eq("user_id", userId).eq("status", "completed");
+  if (error) throw error;
+  await invalidateUserCache(userId);
+  return getTasks(period);
 }
 
 export async function getReminders() {

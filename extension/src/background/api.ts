@@ -11,7 +11,8 @@ function requireBackendUrl(): string {
 
 export function backendDeadlineMs(intent: string): number {
   if (["priority", "spam", "phishing"].includes(intent)) return 15_000;
-  if (["summary", "reply", "tasks"].includes(intent)) return 25_000;
+  if (intent === "reply") return 30_000;
+  if (["summary", "tasks"].includes(intent)) return 25_000;
   return 40_000;
 }
 

@@ -62,11 +62,22 @@ function header(headers: any[] = [], name: string): string {
   return headers.find((item) => item.name.toLowerCase() === name.toLowerCase())?.value || "";
 }
 
-export async function countMessages(query: string, signal?: AbortSignal, accessToken?: string): Promise<number> {
+export async function countMessages(query: string, signal?: AbortSignal, accessToken?: string, exact = false): Promise<number> {
   if (signal?.aborted) throw abortReason(signal);
-  // Gmail's estimate is sufficient for dashboard counts and avoids pagination.
-  const result = await gmailFetch(`/messages?q=${encodeURIComponent(query)}&maxResults=1`, signal, accessToken);
-  return typeof result.resultSizeEstimate === "number" ? result.resultSizeEstimate : 0;
+  if (!exact) {
+    const result = await gmailFetch(`/messages?q=${encodeURIComponent(query)}&maxResults=1`, signal, accessToken);
+    return typeof result.resultSizeEstimate === "number" ? result.resultSizeEstimate : 0;
+  }
+
+  let count = 0;
+  let pageToken = "";
+  do {
+    const suffix = `?q=${encodeURIComponent(query)}&maxResults=500${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`;
+    const result = await gmailFetch(`/messages${suffix}`, signal, accessToken);
+    count += Array.isArray(result.messages) ? result.messages.length : 0;
+    pageToken = result.nextPageToken || "";
+  } while (pageToken);
+  return count;
 }
 
 export interface SentThread {

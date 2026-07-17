@@ -20,10 +20,21 @@ class MailXPromptTests(unittest.TestCase):
         content = "<think>reasoning</think>\n• First fact\n• Second fact\n• Third fact\n• Fourth fact"
         self.assertEqual(clean_summary(content), "• First fact\n• Second fact\n• Third fact")
 
-    def test_reply_json_is_normalized_for_the_content_script(self):
+    def test_reply_json_uses_only_the_first_option_for_the_content_script(self):
         replies = normalize_replies('["Yes, I can help.", "I will review it.", "Can we discuss tomorrow?"]')
         self.assertIn("R1:\nYes, I can help.", replies)
-        self.assertIn("R3:\nCan we discuss tomorrow?", replies)
+        self.assertNotIn("I will review it.", replies)
+        self.assertNotIn("Can we discuss tomorrow?", replies)
+
+    def test_plain_text_reply_is_wrapped_as_one_option(self):
+        self.assertEqual(normalize_replies("Yes, I can help."), "R1:\nYes, I can help.")
+
+    def test_truncated_legacy_reply_array_recovers_first_option(self):
+        content = '["Thanks for the heads-up! Glad it is automatic and no action needed.", "A second option'
+        self.assertEqual(
+            normalize_replies(content),
+            "R1:\nThanks for the heads-up! Glad it is automatic and no action needed.",
+        )
 
     def test_trusted_prompt_does_not_embed_email_content(self):
         prompt = build_prompt("spam", {"sender": "offers@example.com", "subject": "Prize", "body": "Claim now"}, {}, None)
@@ -400,6 +411,7 @@ class MailXTelemetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(main.OUTPUT_TOKEN_BUDGET["priority"], 100)
         self.assertEqual(main.OUTPUT_TOKEN_BUDGET["spam"], 100)
         self.assertEqual(main.OUTPUT_TOKEN_BUDGET["phishing"], 120)
+        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["reply"], 180)
 
     async def test_lifespan_exposes_one_shared_client(self):
         client = FakeAsyncClient()

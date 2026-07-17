@@ -93,25 +93,43 @@ npx skills add supabase/agent-skills
 Then configure `~/.config/opencode/opencode.json` or project-level `.opencode/opencode.json` with your Supabase access token (not the anon key — use `supabase login` to generate one).
 
 ### 4. Run the Servers
+
+Use two terminals. The backend always uses port `8001`. The CRXJS/Vite development server is pinned by `extension/vite.config.ts` to port `5174`; do not use port `5173` and do not start a second Vite process.
+
 ```bash
 # Terminal 1: Backend
-cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8001
+cd backend
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8001
 
 # Terminal 2: Extension dev server
-cd extension && npm run dev
+cd extension
+npm run dev
 ```
+
+Verify both services before debugging the extension:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:8001/health -UseBasicParsing
+Invoke-WebRequest http://127.0.0.1:5174/src/popup/index.html -UseBasicParsing
+```
+
+Both requests must return HTTP `200`. The backend health response should contain `{"status":"ok"}`. The Vite root URL may return `404`; use the popup URL above instead.
+
+If `logs.txt` reports `Cannot connect to http://localhost:5174`, Vite is not running on the port expected by the CRXJS loader. Stop stale Vite processes, start one `npm run dev` process from `extension`, verify the popup URL, and reload the unpacked extension in `chrome://extensions`. Do not fix this by changing the port in only one place.
 
 ### 5. Load Extension in Chrome
 1. Go to `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked** → select `extension/dist/`
-4. Open Gmail and sign in with Google. Dev Login is available only in development builds.
+4. After restarting Vite or changing the generated loader, click the extension reload icon.
+5. Open Gmail and refresh the page.
+6. Sign in with Google. Dev Login is available only in development builds.
 
 ## Commands
 
-- `cd extension && npm run dev` — Start extension dev server (builds to dist/)
+- `cd extension && npm run dev` — Start the extension dev server on `127.0.0.1:5174` and update `dist/`
 - `cd extension && npm run build` — Production build
-- `cd backend && uvicorn main:app --reload --port 8001` — Start backend on port 8001
+- `cd backend && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8001` — Start backend on port 8001
 - `pip install -r backend/requirements.txt` — Install Python deps
 
 ## Deferred

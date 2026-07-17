@@ -1462,7 +1462,29 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
       const reply = text.slice(start, end).trim();
       if (reply) replies.set(match[1], `${replies.get(match[1]) ? `${replies.get(match[1])}\n\n` : ""}${reply}`);
     }
-    return ["1", "2", "3"].map((id) => replies.get(id)).filter((reply): reply is string => Boolean(reply));
+    const markedReplies = ["1", "2", "3"].map((id) => replies.get(id)).filter((reply): reply is string => Boolean(reply));
+    if (markedReplies.length) return markedReplies.slice(0, 1);
+
+    const candidate = text.trim();
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) {
+        const first = parsed.find((item): item is string => typeof item === "string" && Boolean(item.trim()));
+        if (first) return [first.trim()];
+      }
+      if (typeof parsed === "string" && parsed.trim()) return [parsed.trim()];
+    } catch {
+      const firstItem = candidate.match(/^\s*\[\s*("(?:\\.|[^"\\])*")/s);
+      if (firstItem) {
+        try {
+          const first = JSON.parse(firstItem[1]);
+          if (typeof first === "string" && first.trim()) return [first.trim()];
+        } catch {
+          // Fall through to displaying the plain response.
+        }
+      }
+    }
+    return candidate ? [candidate] : [];
   }
 
   function getComposeBox(): HTMLElement | undefined {

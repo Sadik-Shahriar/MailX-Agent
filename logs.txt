@@ -1,3 +1,9 @@
-akespqwzlrsajibjheqg.supabase.co has not completed the Google verification process. The app is currently being tested, and can only be accessed by developer-approved testers. If you think you should have access, contact the developer.
-If you are a developer of akespqwzlrsajibjheqg.supabase.co, see error details.
-Error 403: access_denied
+CRXJS DEV MODE
+Connecting to the Vite dev server…
+
+Cannot connect to http://localhost:5174/src/popup/index.html. Make sure Vite is running, then reload the extension.
+
+This page will close automatically after the extension reloads.
+
+Reload Extension
+Tip: if the URL is wrong, restart Vite so it picks the right port.

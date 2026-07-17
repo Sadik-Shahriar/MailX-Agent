@@ -45,23 +45,39 @@ The default Zen model is `mimo-v2.5-free`, selected for quick email responses. T
 ZEN_MODEL=your_model_id
 ```
 
-Start the backend and keep this terminal open while using the extension:
+Start the backend and keep this terminal open while using the extension. On Windows, use `python -m uvicorn` so the command uses the active Python environment:
 
 ```powershell
-uvicorn main:app --host 0.0.0.0 --port 8001
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-Confirm it is running by opening `http://localhost:8001/health`. It should return `{"status":"ok"}`.
+Confirm it is running before starting the extension:
 
-## 3. Build the Extension
+```powershell
+Invoke-WebRequest http://127.0.0.1:8001/health -UseBasicParsing
+```
+
+The response must be HTTP `200` with `{"status":"ok"}`.
+
+## 3. Install and Run the Extension
 
 Open a second PowerShell terminal:
 
 ```powershell
 cd path\to\MailX-Agent\extension
 npm ci
-npm run build
+npm run dev
 ```
+
+The development server is intentionally pinned in `extension/vite.config.ts` to `127.0.0.1:5174`. Do not start Vite on port `5173` or run a second Vite process. CRXJS writes development loader files into `extension/dist`, and those files must point to the same port as the running Vite server.
+
+Confirm the popup entry is reachable:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:5174/src/popup/index.html -UseBasicParsing
+```
+
+The response must be HTTP `200`. A `404` from `http://127.0.0.1:5174/` is normal because this is an extension project, not a normal web app.
 
 ## 4. Load the Extension in Chrome
 
@@ -70,7 +86,8 @@ npm run build
 3. Click **Load unpacked**.
 4. Select `MailX-Agent\extension\dist`.
 5. Copy the MailX Extension ID shown by Chrome.
-6. After source changes, click the extension reload icon and refresh Gmail.
+6. After source changes, let Vite rebuild, then click the extension reload icon and refresh Gmail.
+7. If Chrome shows `Cannot connect to http://localhost:5174`, stop stale Vite processes, run `npm run dev` from `extension`, verify the popup URL above, then reload the extension again.
 
 ## 5. Supabase Database Setup
 
@@ -129,6 +146,7 @@ https://YOUR_EXTENSION_ID.chromiumapp.org/
 | Google sign-in says provider is not enabled | A Supabase owner must enable Google under Authentication Providers. |
 | OAuth redirect error | Add the exact Chrome callback URL to Supabase Auth Redirect URLs. |
 | Gmail tools do not update | Reload MailX in `chrome://extensions`, then refresh Gmail. |
+| CRXJS cannot connect to Vite on port `5174` | Start exactly one `npm run dev` process from `extension`; verify `http://127.0.0.1:5174/src/popup/index.html` returns `200`, then reload the extension. |
 | AI action fails after a long delay | Check that the Zen/DeepSeek key is active and retry once. |
 
 ## Daily Commands
@@ -136,11 +154,17 @@ https://YOUR_EXTENSION_ID.chromiumapp.org/
 ```powershell
 # Backend terminal
 cd path\to\MailX-Agent\backend
-uvicorn main:app --host 0.0.0.0 --port 8001
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ```powershell
-# Rebuild extension after changes
+# Start the extension development server
+cd path\to\MailX-Agent\extension
+npm run dev
+```
+
+```powershell
+# Production build, after stopping the development server
 cd path\to\MailX-Agent\extension
 npm run build
 ```

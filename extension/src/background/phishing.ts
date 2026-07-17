@@ -63,7 +63,7 @@ export async function checkUrl(
     phishing_sensitivity: preferences.phishing_sensitivity,
   });
   const verdict = await getOrSetCache<UrlVerdict>(cacheKey, async () => {
-    const response = await chat({ intent: "phishing", email_context: { id: canonicalUrl, sender: "", subject: "", body: "", url: canonicalUrl, hostname, heuristics: signals }, preferences, telemetry }, signal, accessToken);
+    const response = await chat({ intent: "phishing", email_context: { id: canonicalUrl, sender: "", subject: "", body: "", url: canonicalUrl, hostname, heuristics: signals }, telemetry }, signal, accessToken);
     if (response.result?.kind !== "phishing") throw new Error("Phishing classifier returned an invalid result.");
     return { url: rawUrl, hostname, ...response.result, heuristics: signals, source: "llm" };
   }, 24 * 60 * 60 * 1000, (event) => {

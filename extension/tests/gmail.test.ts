@@ -47,6 +47,17 @@ describe("Gmail API client", () => {
     expect(fetchMock.mock.calls[0][0]).not.toContain("pageToken");
   });
 
+  test("can count Gmail messages exactly across pages", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ messages: [{ id: "one" }, { id: "two" }], nextPageToken: "next" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ messages: [{ id: "three" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(countMessages("in:sent", undefined, undefined, true)).resolves.toBe(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toContain("pageToken=next");
+  });
+
   test("aborts a stuck Gmail request at its deadline", async () => {
     vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {
