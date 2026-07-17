@@ -1,4 +1,7 @@
-import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
+import { ChatMessage, ExtensionMessage, EmailContext, RequestSource, StructuredAiResult } from "../shared/types";
+import { createRequestTelemetry, elapsedMs, logTelemetry } from "../shared/telemetry";
+import { dispatchRemoteAi } from "../shared/aiPolicy";
+import { DebouncedMessageBodies } from "./toolbarObserver";
 
 (function () {
   if (window.location.hostname !== "mail.google.com") return;
@@ -7,18 +10,16 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
   let actionPanel: HTMLElement | null = null;
   let activeActionButton: HTMLButtonElement | null = null;
   let panelIdleTimer: number | null = null;
-  let lastAutoPriorityKey = "";
-  let lastAutoSpamKey = "";
-  let lastAutoSafetyKey = "";
-  let pendingAutoPriorityKey = "";
-  let pendingAutoSpamKey = "";
-  let pendingAutoSafetyKey = "";
   let statusSourceButton: HTMLButtonElement | null = null;
+  interface AiRequestHandle {
+    requestId: string;
+    cancel: () => void;
+  }
   interface ConversationState {
-    conversationId: string;
     history: ChatTurn[];
     pending: boolean;
     pendingPrompt?: string;
+    request?: AiRequestHandle;
   }
   type ChatTurn = ChatMessage & { isReply?: boolean; draft?: DraftData };
   const conversations = new Map<string, ConversationState>();
@@ -26,6 +27,101 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
   const MAX_CHAT_MESSAGES = 10;
   const PANEL_COLLAPSED_KEY = "mailx_panel_collapsed";
   const PANEL_IDLE_MS = 45_000;
+  const inFlightAiRequests = new Map<string, AiRequestHandle>();
+  let currentPanelRequest: AiRequestHandle | undefined;
+  let lastNavigationKey = window.location.href;
+
+  function telemetryIntent(type: ExtensionMessage["type"]): string {
+    return ({
+      SUMMARIZE: "summarize",
+      SUGGEST_REPLIES: "reply",
+      CLASSIFY_PRIORITY: "priority",
+      EXTRACT_TASKS: "tasks",
+      GENERATE_DRAFT: "draft",
+      CHAT: "chat",
+      CHECK_SPAM: "spam",
+      CHECK_PHISHING_URL: "phishing",
+    } as Partial<Record<ExtensionMessage["type"], string>>)[type] || "unknown";
+  }
+
+  function sendAiMessage(
+    message: ExtensionMessage,
+    source: RequestSource,
+    caller: string,
+    callback: (response: any) => void,
+  ): AiRequestHandle {
+    const telemetry = createRequestTelemetry(source, caller);
+    const ownsPanel = ["action_panel", "chat_composer", "draft_composer"].includes(caller);
+    if (ownsPanel) currentPanelRequest?.cancel();
+    let cancelled = false;
+    let completed = false;
+    let wasDispatched = false;
+    const handle: AiRequestHandle = {
+      requestId: telemetry.request_id,
+      cancel: () => {
+        if (cancelled || completed) return;
+        cancelled = true;
+        inFlightAiRequests.delete(telemetry.request_id);
+        if (currentPanelRequest?.requestId === telemetry.request_id) currentPanelRequest = undefined;
+        if (wasDispatched) {
+          chrome.runtime.sendMessage(
+            { type: "CANCEL_REQUEST", request_id: telemetry.request_id } as ExtensionMessage,
+            () => void chrome.runtime.lastError,
+          );
+        }
+      },
+    };
+    const dispatched = dispatchRemoteAi(source, () => {
+      wasDispatched = true;
+      chrome.runtime.sendMessage({ ...message, telemetry }, (response) => {
+        if (cancelled) return;
+        completed = true;
+        inFlightAiRequests.delete(telemetry.request_id);
+        if (currentPanelRequest?.requestId === telemetry.request_id) currentPanelRequest = undefined;
+        const status = chrome.runtime.lastError || response?.error ? "error" : "success";
+        try {
+          callback(response);
+        } finally {
+          logTelemetry("click_to_result", telemetry, {
+            intent: telemetryIntent(message.type),
+            status,
+            click_to_result_ms: elapsedMs(telemetry.started_at_ms),
+          });
+        }
+      });
+    });
+    if (dispatched) {
+      inFlightAiRequests.set(telemetry.request_id, handle);
+      if (ownsPanel) currentPanelRequest = handle;
+    }
+    else {
+      completed = true;
+      logTelemetry("automatic_remote_blocked", telemetry, {
+        intent: telemetryIntent(message.type),
+      });
+      callback({ error: "Automatic AI analysis is disabled." });
+    }
+    return handle;
+  }
+
+  function cancelAllAiRequests(): void {
+    for (const request of [...inFlightAiRequests.values()]) request.cancel();
+    if (activeActionButton) setActionLoading(activeActionButton, false);
+    for (const state of conversations.values()) {
+      state.request = undefined;
+      state.pending = false;
+      state.pendingPrompt = undefined;
+    }
+    overlayShadow?.querySelector("#mailx-result")?.remove();
+    actionPanel?.classList.remove("has-result");
+  }
+
+  function cancelRequestsAfterNavigation(): void {
+    const navigationKey = window.location.href;
+    if (navigationKey === lastNavigationKey) return;
+    lastNavigationKey = navigationKey;
+    cancelAllAiRequests();
+  }
 
   function init(): void {
     const root = document.createElement("div");
@@ -40,13 +136,16 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
       if (actionPanel) clampPanelToViewport(actionPanel);
     });
 
+    window.addEventListener("hashchange", cancelRequestsAfterNavigation);
     setInterval(() => {
+      cancelRequestsAfterNavigation();
       syncActionPanel();
-      scanInboxForPriority();
-    }, 1000);
-    new MutationObserver(() => {
-      syncMessageToolbar();
-    }).observe(document.body, { childList: true, subtree: true });
+    }, 15_000);
+    const messageBodies = new DebouncedMessageBodies((bodies) => syncMessageToolbar(bodies));
+    const gmailContainer = document.querySelector<HTMLElement>('[role="main"]') || document.body;
+    new MutationObserver((records) => {
+      for (const record of records) messageBodies.add(record.addedNodes);
+    }).observe(gmailContainer, { childList: true, subtree: true });
 
     chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
       if (msg.type === "RENDER_RESULT") renderResult(msg.data);
@@ -319,9 +418,9 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     document.head.appendChild(style);
   }
 
-  function syncMessageToolbar(): void {
-    const bodies = Array.from(document.querySelectorAll<HTMLElement>(".a3s"))
-      .filter((body) => body.offsetParent !== null);
+  function syncMessageToolbar(candidates?: Iterable<HTMLElement>): void {
+    const bodies = [...(candidates || document.querySelectorAll<HTMLElement>(".a3s"))]
+      .filter((body) => body.isConnected && body.offsetParent !== null);
     for (const body of bodies) {
       const card = body.closest<HTMLElement>(".adn.ads, .h7") || body.parentElement;
       const key = messageKey(body);
@@ -347,7 +446,6 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
         toolbar.appendChild(button);
       }
       body.parentElement?.insertBefore(toolbar, body);
-      runToolbarChecks(body, toolbar);
     }
   }
 
@@ -382,61 +480,12 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     button.disabled = !text.toLowerCase().includes("unavailable");
   }
 
-  function runToolbarChecks(body: HTMLElement, toolbar: HTMLElement): void {
-    const context = extractEmailContext(body);
-    if (!context || !hasSummarizableContent(context.body)) return;
-
-    setToolbarStatus(toolbar, "priority", "Priority: checking...");
-    chrome.runtime.sendMessage({ type: "CLASSIFY_PRIORITY", email_context: context } as ExtensionMessage, (response) => {
-      const classification = parsePriorityClassification(String(response?.response || ""));
-      if (!classification || classification.confidence < 0.6) {
-        setToolbarStatus(toolbar, "priority", "Priority: unavailable");
-        return;
-      }
-      const button = toolbarButton(toolbar, "priority");
-      if (!button) return;
-      button.classList.remove("mailx-priority-high", "mailx-priority-medium", "mailx-priority-low");
-      void button.offsetWidth;
-      button.classList.add(`mailx-priority-${classification.priority}`);
-      button.textContent = `Priority: ${classification.priority.toUpperCase()}`;
-      button.disabled = true;
-    });
-
-    setToolbarStatus(toolbar, "spam", "Spam: checking...");
-    chrome.runtime.sendMessage({ type: "CHECK_SPAM", email_context: context } as ExtensionMessage, (response) => {
-      const spam = response?.spam;
-      if (!spam) {
-        setToolbarStatus(toolbar, "spam", "Spam: unavailable");
-        return;
-      }
-      setToolbarStatus(toolbar, "spam", spam.verdict === "spam" ? "Spam: SPAM" : "Spam: SAFE", spam.verdict === "spam" ? "danger" : "safe");
-    });
-
-    const links = [...body.querySelectorAll<HTMLAnchorElement>("a[href]")]
-      .map((link) => link.href).filter(isCheckableLink).filter((url, index, values) => values.indexOf(url) === index).slice(0, 10);
-    if (!links.length) {
-      setToolbarStatus(toolbar, "safety", "Links: NO LINK", "none");
-      return;
-    }
-    setToolbarStatus(toolbar, "safety", "Links: checking...");
-    Promise.all(links.map((url) => new Promise<any>((resolve) => chrome.runtime.sendMessage(
-      { type: "CHECK_PHISHING_URL", url } as ExtensionMessage, resolve
-    )))).then((results) => {
-      if (results.some((result) => result?.error || !result?.verdict)) {
-        setToolbarStatus(toolbar, "safety", "Links: unavailable");
-        return;
-      }
-      const harmful = results.some((result) => result?.verdict?.verdict !== "clean");
-      setToolbarStatus(toolbar, "safety", harmful ? "Links: HARMFUL" : "Links: SAFE", harmful ? "danger" : "safe");
-    }).catch(() => setToolbarStatus(toolbar, "safety", "Links: unavailable"));
-  }
-
   function retryToolbarPriority(body: HTMLElement, toolbar: HTMLElement): void {
     const context = extractEmailContext(body);
     if (!context || !hasSummarizableContent(context.body)) return;
     setToolbarStatus(toolbar, "priority", "Priority: checking...");
-    chrome.runtime.sendMessage({ type: "CLASSIFY_PRIORITY", email_context: context } as ExtensionMessage, (response) => {
-      const classification = parsePriorityClassification(String(response?.response || ""));
+    sendAiMessage({ type: "CLASSIFY_PRIORITY", email_context: context }, "explicit", "message_toolbar", (response) => {
+      const classification = response?.result?.kind === "priority" ? response.result : null;
       if (!classification || classification.confidence < 0.6) {
         setToolbarStatus(toolbar, "priority", "Priority: unavailable");
         return;
@@ -696,8 +745,8 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
       setActionLoading(button, true);
       const links = [...(bodyElement || getLatestVisibleEmailBody())?.querySelectorAll<HTMLAnchorElement>('a[href]') || []]
         .map((link) => link.href).filter(isCheckableLink).filter((url, index, all) => all.indexOf(url) === index).slice(0, 20);
-      Promise.all(links.map((url) => new Promise<any>((resolve) => chrome.runtime.sendMessage(
-        { type: "CHECK_PHISHING_URL", url } as ExtensionMessage, resolve
+      Promise.all(links.map((url) => new Promise<any>((resolve) => sendAiMessage(
+        { type: "CHECK_PHISHING_URL", url }, "explicit", "message_toolbar", resolve
       )))).then((results) => {
         setActionLoading(button, false);
         const toolbar = button.closest<HTMLElement>(".mailx-message-toolbar");
@@ -727,8 +776,10 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
       spam: "CHECK_SPAM",
     };
 
-    chrome.runtime.sendMessage(
+    sendAiMessage(
       { type: typeMap[action], email_context: ctx, prompt } as ExtensionMessage,
+      "explicit",
+      button.dataset.mailxAction ? "message_toolbar" : "action_panel",
       (response) => {
         setActionLoading(button, false);
         if (chrome.runtime.lastError) {
@@ -743,14 +794,14 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
           typeof response?.response === "string"
             ? response.response
             : JSON.stringify(response?.response);
-        if (action === "priority") setPriorityButton(text);
+        if (action === "priority") setPriorityButton(response?.result);
         const spam = response?.spam;
         if (spam && button.dataset.mailxAction) {
           const toolbar = button.closest<HTMLElement>(".mailx-message-toolbar");
           if (toolbar) setToolbarStatus(toolbar, "spam", spam.verdict === "spam" ? "Spam: SPAM" : "Spam: SAFE", spam.verdict === "spam" ? "danger" : "safe");
         }
         if (button.dataset.mailxAction && ["priority", "spam"].includes(action)) return;
-        renderResult({ text: spam ? `${spam.verdict === "spam" ? "Possible spam" : "No spam warning"}: ${spam.reason}` : text, actions: response?.actions, intent: action, tasks: response?.tasks });
+        renderResult({ text: spam ? `${spam.verdict === "spam" ? "Possible spam" : "No spam warning"}: ${spam.reason}` : text, result: response?.result, actions: response?.actions, intent: action, tasks: response?.tasks });
       }
     );
   }
@@ -807,31 +858,8 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     return { id, sender, subject, body };
   }
 
-  function autoClassifyOpenEmail(): void {
-    const context = extractEmailContext();
-    if (!context || !hasSummarizableContent(context.body)) return;
-    const key = `${context.id}:${context.sender}:${context.subject}`;
-    if (key === lastAutoPriorityKey || key === pendingAutoPriorityKey || activeActionButton) return;
-    statusSourceButton = null;
-    pendingAutoPriorityKey = key;
-    setCheckingButton("priority", "Priority");
-
-    chrome.runtime.sendMessage(
-      { type: "CLASSIFY_PRIORITY", email_context: context } as ExtensionMessage,
-      (response) => {
-        pendingAutoPriorityKey = "";
-        if (chrome.runtime.lastError || response?.error) {
-          resetStatusButton("priority", "Priority");
-          return;
-        }
-        lastAutoPriorityKey = key;
-        setPriorityButton(typeof response?.response === "string" ? response.response : "");
-      }
-    );
-  }
-
-  function setPriorityButton(text: string): void {
-    const classification = parsePriorityClassification(text);
+  function setPriorityButton(result: StructuredAiResult | undefined): void {
+    const classification = result?.kind === "priority" ? result : null;
     if (!classification || classification.confidence < 0.6) return;
     forEachActionButton("priority", (button) => {
       button.classList.remove("mailx-priority-high", "mailx-priority-medium", "mailx-priority-low");
@@ -853,85 +881,6 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     const label = button.querySelector<HTMLElement>(".mailx-action-label");
     if (label) label.textContent = value;
     else button.textContent = value;
-  }
-
-  function setStatusButton(action: string, labelText: string, status: "safe" | "warning" | "danger", title: string): void {
-    forEachActionButton(action, (button) => {
-      button.classList.remove("mailx-status-safe", "mailx-status-warning", "mailx-status-danger");
-      void button.offsetWidth;
-      button.classList.add(`mailx-status-${status}`);
-      setButtonLabel(button, labelText);
-      button.title = title;
-    });
-  }
-
-  function setCheckingButton(action: string, labelText: string): void {
-    forEachActionButton(action, (button) => {
-      button.classList.remove("mailx-status-safe", "mailx-status-warning", "mailx-status-danger");
-      setButtonLabel(button, `${labelText}: checking...`);
-      button.title = `${labelText} check in progress`;
-    });
-  }
-
-  function resetStatusButton(action: string, labelText: string): void {
-    forEachActionButton(action, (button) => {
-      button.classList.remove("mailx-status-safe", "mailx-status-warning", "mailx-status-danger");
-      setButtonLabel(button, labelText);
-      button.title = `${labelText} could not be completed automatically`;
-    });
-  }
-
-  function autoCheckSpam(): void {
-    const context = extractEmailContext();
-    if (!context || !hasSummarizableContent(context.body)) return;
-    const key = `${context.id}:${context.sender}:${context.subject}`;
-    if (key === lastAutoSpamKey || key === pendingAutoSpamKey || activeActionButton) return;
-    statusSourceButton = null;
-    pendingAutoSpamKey = key;
-    setCheckingButton("spam", "Spam");
-    chrome.runtime.sendMessage({ type: "CHECK_SPAM", email_context: context } as ExtensionMessage, (response) => {
-      pendingAutoSpamKey = "";
-      if (chrome.runtime.lastError || response?.error || !response?.spam) {
-        resetStatusButton("spam", "Spam Check");
-        return;
-      }
-      lastAutoSpamKey = key;
-      const spam = response.spam;
-      setStatusButton("spam", spam.verdict === "spam" ? "Spam: SPAM" : "Spam: SAFE", spam.verdict === "spam" ? "danger" : "safe", spam.reason || "Spam check complete");
-    });
-  }
-
-  function autoCheckLinkSafety(): void {
-    const context = extractEmailContext();
-    const links = [...getLatestVisibleEmailBody()?.querySelectorAll<HTMLAnchorElement>("a[href]") || []]
-      .map((link) => link.href).filter(isCheckableLink).filter((url, index, all) => all.indexOf(url) === index).slice(0, 10);
-    if (!context) return;
-    const key = `${context.id}:${links.join("|")}`;
-    if (key === lastAutoSafetyKey || key === pendingAutoSafetyKey || activeActionButton) return;
-    statusSourceButton = null;
-    if (!links.length) {
-      lastAutoSafetyKey = key;
-      setStatusButton("safety", "Links: SAFE", "safe", "No links to check");
-      return;
-    }
-    pendingAutoSafetyKey = key;
-    setCheckingButton("safety", "Links");
-    Promise.all(links.map((url) => new Promise<any>((resolve) => chrome.runtime.sendMessage(
-      { type: "CHECK_PHISHING_URL", url } as ExtensionMessage, resolve
-    )))).then((results) => {
-      pendingAutoSafetyKey = "";
-      if (results.some((result) => result?.error)) {
-        resetStatusButton("safety", "Link Safety");
-        return;
-      }
-      lastAutoSafetyKey = key;
-      const verdicts = results.map((result) => result?.verdict).filter(Boolean);
-      const phishing = verdicts.find((verdict) => verdict.verdict === "phishing");
-      const suspicious = verdicts.find((verdict) => verdict.verdict === "suspicious");
-      if (phishing) setStatusButton("safety", "Links: PHISHING", "danger", phishing.reason);
-      else if (suspicious) setStatusButton("safety", "Links: CAUTION", "warning", suspicious.reason);
-      else setStatusButton("safety", "Links: SAFE", "safe", "No suspicious links found");
-    }).catch(() => { pendingAutoSafetyKey = ""; resetStatusButton("safety", "Link Safety"); });
   }
 
   function hasSummarizableContent(body: string): boolean {
@@ -987,7 +936,7 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
       conversations.set(key, existing);
       return existing;
     }
-    const state = { conversationId: crypto.randomUUID(), history: [], pending: false };
+    const state = { history: [], pending: false };
     conversations.set(key, state);
     while (conversations.size > MAX_CONVERSATIONS) conversations.delete(conversations.keys().next().value!);
     return state;
@@ -1005,7 +954,14 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     const back = document.createElement("button");
     back.textContent = "Back";
     back.style.cssText = "float:right;border:0;background:transparent;color:#1a73e8;cursor:pointer;font-size:12px;";
-    back.onclick = () => { container.remove(); actionPanel?.classList.remove("has-result"); };
+    back.onclick = () => {
+      state.request?.cancel();
+      state.request = undefined;
+      state.pending = false;
+      state.pendingPrompt = undefined;
+      container.remove();
+      actionPanel?.classList.remove("has-result");
+    };
     const subtitle = document.createElement("p");
     subtitle.textContent = "Ask about this message or refine a reply using your own instructions.";
     subtitle.style.cssText = "margin:5px 0 9px;color:#5d6b82;font-size:12px;";
@@ -1090,9 +1046,12 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     send.style.cssText = "margin-top:8px;padding:6px 10px;border:0;border-radius:5px;background:#1a73e8;color:#fff;cursor:pointer;";
     const clear = document.createElement("button");
     clear.textContent = "New chat";
-    clear.disabled = state.pending;
     clear.style.cssText = "margin:8px 0 0 7px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer;";
-    clear.onclick = () => { conversations.delete(chatKey(context)); renderChatComposer(context); };
+    clear.onclick = () => {
+      state.request?.cancel();
+      conversations.delete(chatKey(context));
+      renderChatComposer(context);
+    };
     send.onclick = () => {
       const prompt = input.value.trim();
       if (!prompt || state.pending) return;
@@ -1100,7 +1059,9 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
       state.pendingPrompt = prompt;
       renderChatComposer(context);
       const isDraft = isDraftInstruction(prompt);
-      chrome.runtime.sendMessage({ type: isDraft ? "GENERATE_DRAFT" : "CHAT", email_context: context, prompt, conversation_id: state.conversationId, history: state.history } as ExtensionMessage, (response) => {
+      const request = sendAiMessage({ type: isDraft ? "GENERATE_DRAFT" : "CHAT", email_context: context, prompt, history: state.history }, "explicit", "chat_composer", (response) => {
+        if (state.request?.requestId !== request.requestId) return;
+        state.request = undefined;
         state.pending = false;
         state.pendingPrompt = undefined;
         if (chrome.runtime.lastError || response?.error) {
@@ -1113,7 +1074,7 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
           renderChatComposer(context, prompt, "MailX returned an empty response. Please retry.");
           return;
         }
-        const draftAnswer = isDraft ? parseDraft(answer) : null;
+        const draftAnswer = response?.result?.kind === "draft" ? response.result : null;
         state.history.push(
           { role: "user", content: prompt },
           {
@@ -1126,6 +1087,7 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
         state.history = state.history.slice(-MAX_CHAT_MESSAGES);
         renderChatComposer(context);
       });
+      state.request = request;
     };
     container.append(title, back, subtitle, transcript, chips, input, errorLine, send, clear);
     actionPanel.classList.add("has-result");
@@ -1183,7 +1145,7 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     const content = document.createElement("div");
     content.style.whiteSpace = "pre-wrap";
     const text = typeof data === "string" ? data : data?.text || JSON.stringify(data);
-    const draft = data?.intent === "draft" ? parseDraft(text) : null;
+    const draft = data?.result?.kind === "draft" ? data.result as DraftData : null;
     content.textContent = draft ? formatDraft(draft, true) : text;
     if (data?.intent === "tasks") {
       content.textContent = data?.tasks?.length
@@ -1193,12 +1155,12 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     }
     container.appendChild(content);
 
-    if (data?.intent === "priority") {
-      const match = text.match(/"priority"\s*:\s*"(high|medium|low)"/i);
-      if (match) {
-        content.textContent = `Priority: ${match[1].toUpperCase()}`;
+    if (data?.result?.kind === "priority") {
+      const priority = data.result.priority;
+      if (priority) {
+        content.textContent = `Priority: ${priority.toUpperCase()}`;
         content.style.fontWeight = "700";
-        content.style.color = match[1].toLowerCase() === "high" ? "#b91c1c" : match[1].toLowerCase() === "medium" ? "#a16207" : "#15803d";
+        content.style.color = priority === "high" ? "#b91c1c" : priority === "medium" ? "#a16207" : "#15803d";
       }
     }
 
@@ -1307,7 +1269,7 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
           if (a.action === "copy") {
             btn.textContent = await copyText(draft ? formatDraft(draft, true) : text) ? "Copied" : "Copy failed";
           } else if (a.action === "insert") {
-            const inserted = insertIntoCompose(extractInsertText(text, data?.intent));
+            const inserted = insertIntoCompose(extractInsertText(text, data?.intent, data?.result));
             if (inserted) { btn.textContent = "Inserted"; closeResult(); }
             else showToast("Open a Gmail reply or compose box first");
           } else {
@@ -1376,24 +1338,30 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     const cancel = document.createElement("button");
     cancel.textContent = "Cancel";
     const generate = document.createElement("button");
+    let pendingRequest: AiRequestHandle | undefined;
     generate.textContent = "Generate draft";
     for (const button of [cancel, generate]) button.style.cssText = "margin-top:8px;padding:6px 10px;border-radius:5px;cursor:pointer;font-size:12px;";
     cancel.style.cssText += "border:1px solid #cbd5e1;background:#fff;color:#334155;";
     generate.style.cssText += "margin-left:7px;border:1px solid #1a73e8;background:#1a73e8;color:#fff;";
-    cancel.onclick = () => { container.remove(); actionPanel?.classList.remove("has-result"); };
+    cancel.onclick = () => {
+      pendingRequest?.cancel();
+      container.remove();
+      actionPanel?.classList.remove("has-result");
+    };
     generate.onclick = () => {
       const prompt = input.value.trim();
       if (!prompt) { error.textContent = "Enter what you want to draft first."; input.focus(); return; }
       generate.disabled = true;
       generate.textContent = "Generating...";
-      chrome.runtime.sendMessage({ type: "GENERATE_DRAFT", email_context: ctx, prompt } as ExtensionMessage, (response) => {
+      pendingRequest = sendAiMessage({ type: "GENERATE_DRAFT", email_context: ctx, prompt }, "explicit", "draft_composer", (response) => {
+        pendingRequest = undefined;
         if (chrome.runtime.lastError || response?.error) {
           error.textContent = response?.error || chrome.runtime.lastError?.message || "Could not generate the draft.";
           generate.disabled = false;
           generate.textContent = "Generate draft";
           return;
         }
-        renderResult({ text: response.response, actions: response.actions, intent: "draft" });
+        renderResult({ text: response.response, result: response.result, actions: response.actions, intent: "draft" });
       });
     };
     container.append(title, hint, input, error, cancel, generate);
@@ -1449,11 +1417,10 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
       classifiedRows.add(row);
       return;
     }
-    chrome.runtime.sendMessage({ type: "CLASSIFY_PRIORITY", email_context: {
+    sendAiMessage({ type: "CLASSIFY_PRIORITY", email_context: {
       id: row.getAttribute('data-legacy-thread-id') || `${sender}:${subject}`, sender, subject, snippet, body: "",
-    } }, (response) => {
-      const result = typeof response?.response === "string" ? response.response : "";
-      const classification = parsePriorityClassification(result);
+    } }, "automatic", "inbox_scan", (response) => {
+        const classification = response?.result?.kind === "priority" ? response.result : null;
       if (!classification) {
         priorityPendingRows.delete(row);
         return;
@@ -1468,42 +1435,12 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
     });
   }
 
-  function parsePriorityClassification(text: string): { priority: "high" | "medium" | "low"; confidence: number } | null {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      const value = JSON.parse(match[0]);
-      if (!["high", "medium", "low"].includes(value.priority)) return null;
-      return { priority: value.priority, confidence: Number(value.confidence) || 0 };
-    } catch { return null; }
-  }
-
-  function extractInsertText(text: string, intent: string): string {
+  function extractInsertText(text: string, intent: string, result?: StructuredAiResult): string {
     if (intent !== "draft") return text.replace(/^R\d\s*[:.-]\s*/gim, "").trim();
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return text;
-    try {
-      const draft = JSON.parse(match[0]);
-      return [draft.greeting, draft.body, draft.signOff].filter(Boolean).join("\n\n");
-    } catch { return text; }
+    return result?.kind === "draft" ? [result.greeting, result.body, result.sign_off].join("\n\n") : text;
   }
 
-  interface DraftData {
-    to?: string | null;
-    subject?: string;
-    greeting?: string;
-    body?: string;
-    signOff?: string;
-  }
-
-  function parseDraft(text: string): DraftData | null {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      const draft = JSON.parse(match[0]);
-      return draft && typeof draft === "object" ? draft as DraftData : null;
-    } catch { return null; }
-  }
+  type DraftData = Extract<StructuredAiResult, { kind: "draft" }>;
 
   function formatDraft(draft: DraftData, includeSubject: boolean): string {
     return [
@@ -1511,7 +1448,7 @@ import { ChatMessage, ExtensionMessage, EmailContext } from "../shared/types";
       includeSubject && draft.subject ? `Subject: ${draft.subject}` : "",
       draft.greeting || "",
       draft.body || "",
-      draft.signOff || "",
+      draft.sign_off || "",
     ].filter(Boolean).join("\n\n");
   }
 

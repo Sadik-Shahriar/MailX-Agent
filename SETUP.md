@@ -4,8 +4,8 @@ Use this guide to run MailX locally. Do not commit API keys, OAuth client secret
 
 ## Prerequisites
 
-- Node.js 18 or newer
-- Python 3.10 or newer
+- Node.js 22-24 with npm 10+
+- Python 3.13
 - Google Chrome or Chromium
 - A Gmail account permitted by the Google OAuth consent screen
 - A Zen API key or DeepSeek API key
@@ -59,7 +59,7 @@ Open a second PowerShell terminal:
 
 ```powershell
 cd path\to\MailX-Agent\extension
-npm install
+npm ci
 npm run build
 ```
 
@@ -78,7 +78,7 @@ This requires a Supabase project owner or admin.
 
 1. Open the Supabase project SQL Editor.
 2. Run the full contents of `supabase/schema.sql`.
-3. Verify that the `preferences`, `sender_scores`, `tasks`, `reminders`, and `email_activity` tables exist.
+3. Verify that the `preferences`, `tasks`, and `reminders` tables exist.
 
 The extension already contains the project URL and public anonymous key. Never place a Supabase `service_role` key in the extension.
 
@@ -117,7 +117,7 @@ https://YOUR_EXTENSION_ID.chromiumapp.org/
 1. Open Gmail and refresh the page.
 2. Click the MailX extension icon.
 3. Choose **Sign in with Google** and grant the requested Gmail permissions.
-4. Open an email to use Summarize, Smart Reply, Priority, and Tasks.
+4. Open an email to use Summarize, Smart Reply, Priority, Spam Check, Link Safety, and Tasks. These checks run only when explicitly clicked.
 5. Use Draft from any Gmail view.
 
 ## Common Problems

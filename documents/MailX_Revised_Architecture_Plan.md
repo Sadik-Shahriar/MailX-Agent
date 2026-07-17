@@ -2,6 +2,8 @@
 
 **Revised Architecture & Implementation Plan (MVP)**
 
+> Status: historical design proposal, superseded by the implemented release. It does not describe the current runtime behavior. Use `README.md`, `AGENTS.md`, and `plan.md` for release setup, scope, and feature status.
+
 CSE412 Software Engineering, Section 5, Summer 2026
 East West University
 

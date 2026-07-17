@@ -3,7 +3,7 @@
 
 -- 1. User Preferences
 create table if not exists public.preferences (
-  user_id uuid references auth.users primary key,
+  user_id uuid references auth.users on delete cascade primary key,
   reply_tone text not null default 'professional'
     check (reply_tone in ('formal', 'casual', 'professional')),
   reminder_delay_days int not null default 3,
@@ -21,22 +21,7 @@ alter table public.preferences
     check (phishing_sensitivity in ('low', 'default', 'high')),
   add column if not exists phishing_allowlist text[] not null default '{}';
 
--- 2. Sender Scores (FR4 behavioral learning)
-create table if not exists public.sender_scores (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users on delete cascade,
-  sender_email text not null,
-  sender_name text,
-  score int not null default 50
-    check (score >= 0 and score <= 100),
-  reply_count int not null default 0,
-  median_response_minutes int,
-  last_interaction_at timestamptz,
-  created_at timestamptz not null default now(),
-  unique (user_id, sender_email)
-);
-
--- 3. Tasks (FR5)
+-- 2. Tasks (FR5)
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users on delete cascade,
@@ -51,10 +36,14 @@ create table if not exists public.tasks (
   status text not null default 'pending'
     check (status in ('pending', 'completed', 'dismissed')),
   created_at timestamptz not null default now(),
-  completed_at timestamptz
+  completed_at timestamptz,
+  dedupe_key text generated always as (
+    lower(coalesce(email_id, '') || ':' || regexp_replace(btrim(description), '\s+', ' ', 'g'))
+  ) stored not null,
+  unique (user_id, dedupe_key)
 );
 
--- 4. Follow-Up Reminders (FR6)
+-- 3. Follow-Up Reminders (FR6)
 create table if not exists public.reminders (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users on delete cascade,
@@ -66,99 +55,57 @@ create table if not exists public.reminders (
   sent_date timestamptz,
   dismissed bool not null default false,
   resolved bool not null default false,
-  created_at timestamptz not null default now()
-);
-
--- 5. Email Activity Log (FR10)
-create table if not exists public.email_activity (
-  id bigint primary key generated always as identity,
-  user_id uuid not null references auth.users on delete cascade,
-  date date not null,
-  emails_sent int not null default 0,
-  emails_received int not null default 0,
-  replies_sent int not null default 0,
-  unique (user_id, date)
-);
-
--- 6. Email-open tracking. The backend writes open events with its service-role key.
-create table if not exists public.tracked_emails (
-  tid uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users on delete cascade,
-  gmail_thread_id text,
-  gmail_message_id text,
-  recipient text,
-  subject text,
-  status text not null default 'sent' check (status in ('sent', 'opened')),
-  open_count integer not null default 0,
-  first_opened_at timestamptz,
-  last_opened_at timestamptz,
-  created_at timestamptz not null default now()
-);
-
-create table if not exists public.open_events (
-  id bigint primary key generated always as identity,
-  tid uuid not null references public.tracked_emails(tid) on delete cascade,
-  occurred_at timestamptz not null default now(),
-  source text not null default 'unknown'
-    check (source in ('unknown', 'gmail_proxy', 'apple_mpp', 'gateway'))
+  notified_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (user_id, type, source_id)
 );
 
 -- Row Level Security
 alter table public.preferences enable row level security;
-alter table public.sender_scores enable row level security;
 alter table public.tasks enable row level security;
 alter table public.reminders enable row level security;
-alter table public.email_activity enable row level security;
-alter table public.tracked_emails enable row level security;
-alter table public.open_events enable row level security;
 
 -- RLS Policies
 drop policy if exists "Users own their preferences" on public.preferences;
-drop policy if exists "Users own their sender scores" on public.sender_scores;
 drop policy if exists "Users own their tasks" on public.tasks;
 drop policy if exists "Users own their reminders" on public.reminders;
-drop policy if exists "Users own their activity" on public.email_activity;
-drop policy if exists "Users own their tracked emails" on public.tracked_emails;
-drop policy if exists "Users read their tracked open events" on public.open_events;
 
 create policy "Users own their preferences"
   on public.preferences for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
-create policy "Users own their sender scores"
-  on public.sender_scores for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users own their tasks"
   on public.tasks for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 create policy "Users own their reminders"
   on public.reminders for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
-create policy "Users own their activity"
-  on public.email_activity for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
-create policy "Users own their tracked emails"
-  on public.tracked_emails for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
-create policy "Users read their tracked open events"
-  on public.open_events for select
-  using (exists (select 1 from public.tracked_emails t where t.tid = open_events.tid and t.user_id = auth.uid()));
+  to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
 
 -- Indexes for performance
-create index if not exists idx_sender_scores_user on public.sender_scores(user_id);
 create index if not exists idx_tasks_user_status on public.tasks(user_id, status);
+create index if not exists idx_tasks_user_status_created on public.tasks(user_id, status, created_at desc);
 create index if not exists idx_reminders_user on public.reminders(user_id);
-create index if not exists idx_email_activity_user_date on public.email_activity(user_id, date);
-create index if not exists idx_tracked_emails_user_created on public.tracked_emails(user_id, created_at desc);
-create index if not exists idx_open_events_tid_occurred on public.open_events(tid, occurred_at desc);
+create index if not exists idx_reminders_user_active_created on public.reminders(user_id, resolved, dismissed, created_at desc);
+
+-- Aggregate task statistics without returning task rows to the popup.
+create or replace function public.get_task_stats(since timestamptz)
+returns table (completed_tasks bigint, pending_tasks bigint)
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select
+    count(*) filter (where status = 'completed') as completed_tasks,
+    count(*) filter (where status = 'pending') as pending_tasks
+  from public.tasks
+  where user_id = (select auth.uid())
+    and created_at >= since;
+$$;
+
+revoke execute on function public.get_task_stats(timestamptz) from public, anon;
+grant execute on function public.get_task_stats(timestamptz) to authenticated;

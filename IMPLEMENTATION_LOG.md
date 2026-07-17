@@ -19,12 +19,11 @@ Updated: July 15, 2026
 - Added `spam`, `phishing`, and contextual `chat` intents.
 - Added prompt and response handling for structured drafts, including recipient, subject, greeting, body, and sign-off.
 - Added validated, bounded chronological chat history.
-- Added an email-open tracking pixel endpoint and Render deployment files.
 
 ### Gmail Extension
 
 - Added message-level toolbars for Priority, Spam Check, and Link Safety.
-- Added automatic Priority, Spam, and Link Safety checks for expanded messages.
+- Added explicit Priority, Spam Check, and Link Safety actions for opened messages.
 - Added safe retry behavior for unavailable toolbar verdicts.
 - Added three Link Safety states: `NO LINK`, `HARMFUL`, and `SAFE`.
 - Added bounded AI request queueing to prevent automatic checks from overwhelming the LLM provider.
@@ -37,7 +36,6 @@ Updated: July 15, 2026
 ### Data And Reminders
 
 - Added spam/phishing preferences to Supabase preferences.
-- Added `tracked_emails` and `open_events` schema tables with RLS policies and indexes.
 - Added task deduplication.
 - Added reminder resolution for completed tasks and replied-to sent threads.
 - Added reminder notification preference controls.
@@ -56,12 +54,10 @@ Updated: July 15, 2026
 - Apply the current `supabase/schema.sql` in Supabase SQL Editor.
 - Keep Supabase Google OAuth and Google Cloud Gmail API configuration active.
 - Validate Gmail DOM selectors, recipient insertion, toolbar placement, and multi-message conversation behavior with a real account.
-- Deploy the backend to Render before using email-open tracking outside local testing.
-- Configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` only as Render environment variables; never expose the service-role key to the extension.
 - Add browser end-to-end tests for Gmail DOM behavior and integration tests for Supabase-backed operations.
 
 ## Intentional Scope Notes
 
-- Email-open tracking currently includes schema, pixel endpoint, and deployment preparation. Its compose-time pixel injection and tracking dashboard still require public HTTPS deployment validation.
+- Email-open tracking is deferred from this release. The pixel endpoint, service-role configuration, and new-install schema claims were removed; any legacy tracking rows are retained only for existing owners and are not produced or displayed.
 - Spam and Link Safety are advisory classifications. They do not move, delete, or modify Gmail messages.
 - Chat history is retained only in the current content-script session and is not persisted to Supabase or the backend.

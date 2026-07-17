@@ -4,6 +4,9 @@ export interface EmailContext {
   subject: string;
   body: string;
   snippet?: string;
+  url?: string;
+  hostname?: string;
+  heuristics?: string[];
 }
 
 export interface UserPreferences {
@@ -16,6 +19,36 @@ export interface UserPreferences {
   spam_blacklist: string[];
   phishing_sensitivity: "low" | "default" | "high";
   phishing_allowlist: string[];
+}
+
+export type RequestSource = "explicit" | "automatic" | "unknown";
+
+export interface RequestTelemetry {
+  request_id: string;
+  source: RequestSource;
+  caller: string;
+  started_at_ms: number;
+}
+
+export interface ProviderUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+}
+
+export interface ResponseTelemetry {
+  request_id: string;
+  source: RequestSource;
+  intent: string;
+  model?: string;
+  provider_duration_ms?: number;
+  backend_duration_ms: number;
+  input_characters?: number;
+  usage?: ProviderUsage;
+  finish_reason?: string;
+  retry_count: number;
+  retry_reason?: string;
+  retry_reasons?: string[];
 }
 
 export interface SpamResult {
@@ -41,15 +74,24 @@ export interface ChatRequest {
   email_context?: EmailContext;
   preferences?: Partial<UserPreferences>;
   prompt?: string;
-  conversation_id?: string;
   history?: ChatMessage[];
+  telemetry?: RequestTelemetry;
 }
+
+export type StructuredAiResult =
+  | { kind: "priority"; priority: "high" | "medium" | "low"; category: "action_required" | "fyi" | "scheduling" | "newsletter"; confidence: number }
+  | { kind: "tasks"; tasks: Array<{ description: string; assignee: string; due_date: string | null; priority: "high" | "medium" | "low" }> }
+  | { kind: "draft"; to: string | null; subject: string; greeting: string; body: string; sign_off: string }
+  | { kind: "spam"; verdict: "spam" | "not_spam"; confidence: number; reason: string; category: "bulk" | "impersonation" | "newsletter" | "normal" | "transactional" }
+  | { kind: "phishing"; verdict: "clean" | "suspicious" | "phishing"; confidence: number; reason: string };
 
 export interface ChatResponse {
   intent: string;
   response: string | string[];
+  result?: StructuredAiResult;
   actions: ActionButton[];
   email_id?: string;
+  telemetry?: ResponseTelemetry;
 }
 
 export interface ActionButton {
@@ -75,12 +117,6 @@ export interface Task {
   email_sender?: string;
 }
 
-export interface SenderScore {
-  sender_email: string;
-  score: number;
-  reply_count: number;
-}
-
 export type MessageType =
   | "SUMMARIZE"
   | "SUGGEST_REPLIES"
@@ -100,7 +136,8 @@ export type MessageType =
   | "SIGN_OUT"
   | "DEV_SIGN_IN"
   | "CHECK_SPAM"
-  | "CHECK_PHISHING_URL";
+  | "CHECK_PHISHING_URL"
+  | "CANCEL_REQUEST";
 
 export interface ExtensionMessage {
   type: MessageType;
@@ -108,11 +145,12 @@ export interface ExtensionMessage {
   email_context?: EmailContext;
   prompt?: string;
   task_id?: string;
-  conversation_id?: string;
   history?: ChatMessage[];
   email?: string;
   reminder_id?: string;
   period?: 7 | 30 | 90;
   preferences?: Partial<UserPreferences>;
   url?: string;
+  telemetry?: RequestTelemetry;
+  request_id?: string;
 }

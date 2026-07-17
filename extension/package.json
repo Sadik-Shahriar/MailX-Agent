@@ -5,23 +5,27 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/verify-release.mjs",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "dompurify": "^3.2.4"
+    "@supabase/supabase-js": "2.110.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
-    "@types/chrome": "^0.0.287",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@types/dompurify": "^3.0.5",
-    "@vitejs/plugin-react": "^4.3.4",
-    "@crxjs/vite-plugin": "^2.7.0",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.5"
+    "@crxjs/vite-plugin": "2.7.1",
+    "@types/chrome": "0.0.287",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.9.3",
+    "vite": "6.4.3",
+    "vitest": "3.2.7"
+  },
+  "engines": {
+    "node": ">=22 <25",
+    "npm": ">=10"
   }
 }

@@ -1,37 +1,75 @@
-import { chat } from "./api";
+import { backendDeadlineMs, chat } from "./api";
 import { setupReminderAlarm, handleReminderCheck } from "./reminders";
-import { ExtensionMessage, Task } from "../shared/types";
-import { getOrSetCache } from "../shared/cache";
-import { signInWithGoogle, devSignIn, signOut, getSession, getPreferences, getTasks, saveTasks, toggleTask, getReminders, dismissReminder, savePreferences } from "./supabase";
+import { ExtensionMessage, RequestTelemetry, StructuredAiResult, Task } from "../shared/types";
+import { CacheTelemetryEvent, getOrSetCache } from "../shared/cache";
+import { signInWithGoogle, signOut, getSession, getPreferences, getTasks, saveTasks, toggleTask, getReminders, dismissReminder, savePreferences } from "./supabase";
 import { getStats } from "./stats";
 import { checkSpam } from "./spam";
 import { checkUrl } from "./phishing";
+import { enqueueAi, queueLaneForMessage, QueueLane } from "./queue";
+import { ensureRequestTelemetry, logTelemetry } from "../shared/telemetry";
+import { canSendRemoteAi } from "../shared/aiPolicy";
+import { abortReason, createDeadlineSignal } from "../shared/abort";
+import { RequestRegistry } from "./requestRegistry";
+import { responseCacheKey } from "../shared/cacheKeys";
 
-// Free LLM providers become unreliable with an unbounded burst, but a single
-// queue makes a conversation wait behind older inbox jobs. Keep two in flight.
-let activeAiRequests = 0;
-const pendingAiRequests: (() => void)[] = [];
+const requestRegistry = new RequestRegistry();
 
-function enqueueAi<T>(work: () => Promise<T>, interactive = false): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const run = () => {
-      activeAiRequests += 1;
-      work().then(resolve, reject).finally(() => {
-        activeAiRequests -= 1;
-        pendingAiRequests.shift()?.();
-      });
-    };
-    if (activeAiRequests < 2) run();
-    else if (interactive) pendingAiRequests.unshift(run);
-    else pendingAiRequests.push(run);
+function requireExplicitAi(telemetry: RequestTelemetry, intent: string): void {
+  if (canSendRemoteAi(telemetry.source)) return;
+  logTelemetry("automatic_remote_blocked", telemetry, { intent });
+  throw new Error("Automatic AI analysis is disabled.");
+}
+
+function logCacheEvent(telemetry: RequestTelemetry, intent: string, event: CacheTelemetryEvent): void {
+  if (event.outcome === "hit" || event.outcome === "miss" || event.outcome === "coalesced" || event.outcome === "read_error") {
+    logTelemetry("cache_lookup", telemetry, { intent, cache_outcome: event.outcome });
+    return;
+  }
+  if ("persistence_ms" in event) logTelemetry("cache_persistence", telemetry, {
+    intent,
+    status: event.outcome === "persisted" ? "success" : "error",
+    cache_persistence_ms: event.persistence_ms,
   });
+}
+
+function enqueueTraced<T>(
+  work: (signal: AbortSignal) => Promise<T>,
+  telemetry: RequestTelemetry,
+  intent: string,
+  lane: QueueLane,
+  signal: AbortSignal,
+): Promise<T> {
+  return enqueueAi(work, {
+    lane,
+    signal,
+    expiresInMs: lane === "foreground" ? 15_000 : 8_000,
+    runTimeoutMs: backendDeadlineMs(intent),
+    onStart: (metrics) => logTelemetry("queue_started", telemetry, { intent, ...metrics }),
+  });
+}
+
+async function withRegisteredRequest<T>(
+  telemetry: RequestTelemetry,
+  timeoutMs: number,
+  work: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = requestRegistry.register(telemetry.request_id);
+  const deadline = createDeadlineSignal(controller.signal, timeoutMs);
+  try {
+    if (deadline.signal.aborted) throw abortReason(deadline.signal);
+    return await work(deadline.signal);
+  } finally {
+    deadline.cleanup();
+    requestRegistry.release(telemetry.request_id, controller);
+  }
 }
 
 // Handle messages from content scripts and popup
 chrome.runtime.onMessage.addListener(
   (message: ExtensionMessage, _sender, sendResponse) => {
     handleMessage(message).then(sendResponse).catch((err) => {
-      console.error("[MailX] Error handling message:", err);
+      if (err?.name !== "AbortError") console.error("[MailX] Error handling message:", err);
       sendResponse({ error: err.message });
     });
     return true;
@@ -39,6 +77,15 @@ chrome.runtime.onMessage.addListener(
 );
 
 async function handleMessage(msg: ExtensionMessage): Promise<any> {
+  if (import.meta.env.DEV && msg.type === "DEV_SIGN_IN") {
+    const { devSignIn } = await import("./supabase");
+    await devSignIn(msg.email);
+    const session = await getSession();
+    return {
+      loggedIn: !!session,
+      email: session?.user?.email || "dev@mailx.local",
+    };
+  }
   switch (msg.type) {
     case "SUMMARIZE":
     case "SUGGEST_REPLIES":
@@ -46,7 +93,7 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
     case "EXTRACT_TASKS":
     case "GENERATE_DRAFT":
     case "CHAT": {
-      if (!await getSession()) throw new Error("Sign in before using MailX AI tools.");
+      const telemetry = ensureRequestTelemetry(msg.telemetry);
       const intentMap: Record<string, string> = {
         SUMMARIZE: "summarize",
         SUGGEST_REPLIES: "reply",
@@ -55,28 +102,69 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
         GENERATE_DRAFT: "draft",
         CHAT: "chat",
       };
-      // Replies, drafts, and task extraction must reflect the current message and
-      // user intent; caching them can surface a response from another Gmail thread.
-      const isCacheable = msg.type === "SUMMARIZE" || msg.type === "CLASSIFY_PRIORITY";
-      const cacheKey = isCacheable && msg.email_context?.id
-        ? `${intentMap[msg.type]}:${msg.email_context.id}:${msg.prompt || ""}` : "";
-      const request = {
-        intent: intentMap[msg.type] || "chat",
-        email_context: msg.email_context,
-        prompt: msg.prompt,
-        conversation_id: msg.conversation_id,
-        history: msg.history,
-        preferences: await getPreferences(),
-      };
-      const response = cacheKey
-        ? await getOrSetCache(cacheKey, () => enqueueAi(() => chat(request)), 30 * 60 * 1000)
-        : await enqueueAi(() => chat(request), msg.type === "CHAT");
-      if (msg.type === "EXTRACT_TASKS" && msg.email_context) {
-        const parsed = parseTasks(response.response, msg.email_context);
-        const tasks = await saveTasks(parsed);
-        return { ...response, tasks, response: tasks.length ? response.response : "No tasks found in this email." };
-      }
-      return response;
+      logTelemetry("request_received", telemetry, { intent: intentMap[msg.type] });
+      requireExplicitAi(telemetry, intentMap[msg.type]);
+      return withRegisteredRequest(telemetry, backendDeadlineMs(intentMap[msg.type]), async (signal) => {
+        const session = await getSession();
+        if (!session) throw new Error("Sign in before using MailX AI tools.");
+        if (signal.aborted) throw abortReason(signal);
+        // Replies, drafts, and task extraction must reflect the current message and
+        // user intent; caching them can surface a response from another Gmail thread.
+        const isCacheable = msg.type === "SUMMARIZE" || msg.type === "CLASSIFY_PRIORITY";
+        const content = msg.type === "SUMMARIZE"
+          ? { body: msg.email_context?.body || "" }
+          : {
+            sender: msg.email_context?.sender || "",
+            subject: msg.email_context?.subject || "",
+            snippet: msg.email_context?.snippet || "",
+          };
+        const cacheKey = isCacheable && msg.email_context
+          ? await responseCacheKey(session.user.id, intentMap[msg.type] as "summarize" | "priority", content)
+          : "";
+        const preferences = msg.type === "SUGGEST_REPLIES" || msg.type === "GENERATE_DRAFT"
+          ? await getPreferences()
+          : undefined;
+        const request = {
+          intent: intentMap[msg.type] || "chat",
+          email_context: msg.email_context,
+          prompt: msg.prompt,
+          history: msg.history,
+          preferences,
+          telemetry,
+        };
+        const lane = queueLaneForMessage(msg.type);
+        const response = cacheKey
+          ? await getOrSetCache(
+            cacheKey,
+            () => enqueueTraced((queueSignal) => chat(request, queueSignal, session.access_token), telemetry, request.intent, lane, signal),
+            30 * 60 * 1000,
+            (event) => logCacheEvent(telemetry, request.intent, event),
+            { owner: session.user.id },
+          )
+          : await enqueueTraced((queueSignal) => chat(request, queueSignal, session.access_token), telemetry, request.intent, lane, signal);
+        if (signal.aborted) throw abortReason(signal);
+        if (msg.type === "EXTRACT_TASKS" && msg.email_context) {
+          const parsed = response.result?.kind === "tasks" ? parseTasks(response.result, msg.email_context) : [];
+          const persistenceStarted = performance.now();
+          try {
+            const tasks = await saveTasks(parsed);
+            logTelemetry("persistence_finished", telemetry, {
+              intent: request.intent,
+              status: "success",
+              persistence_ms: Math.round((performance.now() - persistenceStarted) * 100) / 100,
+            });
+            return { ...response, tasks, response: tasks.length ? response.response : "No tasks found in this email." };
+          } catch (error) {
+            logTelemetry("persistence_finished", telemetry, {
+              intent: request.intent,
+              status: "error",
+              persistence_ms: Math.round((performance.now() - persistenceStarted) * 100) / 100,
+            });
+            throw error;
+          }
+        }
+        return response;
+      });
     }
 
     case "GET_TASKS": {
@@ -90,13 +178,36 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
 
     case "CHECK_SPAM": {
       if (!msg.email_context) throw new Error("Open an email before checking it.");
-      return { spam: await enqueueAi(() => checkSpam(msg.email_context!, getPreferences())) };
+      const telemetry = ensureRequestTelemetry(msg.telemetry);
+      logTelemetry("request_received", telemetry, { intent: "spam" });
+      requireExplicitAi(telemetry, "spam");
+      return withRegisteredRequest(telemetry, backendDeadlineMs("spam"), async (signal) => {
+        const session = await getSession();
+        if (!session) throw new Error("Sign in before using MailX AI tools.");
+        return { spam: await enqueueTraced(
+          (queueSignal) => checkSpam(msg.email_context!, getPreferences, session.user.id, telemetry, queueSignal, session.access_token),
+          telemetry, "spam", "background", signal,
+        ) };
+      });
     }
 
     case "CHECK_PHISHING_URL": {
       if (!msg.url) throw new Error("Missing URL.");
-      return { verdict: await enqueueAi(() => checkUrl(msg.url!, getPreferences())) };
+      const telemetry = ensureRequestTelemetry(msg.telemetry);
+      logTelemetry("request_received", telemetry, { intent: "phishing" });
+      requireExplicitAi(telemetry, "phishing");
+      return withRegisteredRequest(telemetry, backendDeadlineMs("phishing"), async (signal) => {
+        const session = await getSession();
+        if (!session) throw new Error("Sign in before using MailX AI tools.");
+        return { verdict: await enqueueTraced(
+          (queueSignal) => checkUrl(msg.url!, getPreferences, session.user.id, telemetry, queueSignal, session.access_token),
+          telemetry, "phishing", "background", signal,
+        ) };
+      });
     }
+
+    case "CANCEL_REQUEST":
+      return { cancelled: !!msg.request_id && requestRegistry.cancel(msg.request_id) };
 
     case "GET_REMINDERS": return { reminders: await getReminders() };
     case "DISMISS_REMINDER":
@@ -113,15 +224,6 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
       return {
         loggedIn: !!session,
         email: session?.user?.email || "",
-      };
-    }
-
-    case "DEV_SIGN_IN": {
-      await devSignIn(msg.email);
-      const session = await getSession();
-      return {
-        loggedIn: !!session,
-        email: session?.user?.email || "dev@mailx.local",
       };
     }
 
@@ -143,20 +245,12 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
   }
 }
 
-function parseTasks(response: string | string[], context: NonNullable<ExtensionMessage["email_context"]>): Omit<Task, "id" | "status" | "created_at">[] {
-  const text = Array.isArray(response) ? response.join("\n") : response;
-  const match = text.match(/\[[\s\S]*\]/);
-  if (!match) return [];
-  try {
-    const parsed = JSON.parse(match[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((task) => typeof task?.description === "string" && task.description.trim()).map((task) => ({
-      email_id: context.id, email_subject: context.subject, email_sender: context.sender,
-      description: task.description.trim(), assignee: task.assignee === "me" ? "me" : String(task.assignee || "me"),
-      due_date: /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate || task.due_date || "") ? (task.dueDate || task.due_date) : null,
-      priority: ["high", "medium", "low"].includes(task.priority) ? task.priority : "medium",
-    }));
-  } catch { return []; }
+function parseTasks(result: Extract<StructuredAiResult, { kind: "tasks" }>, context: NonNullable<ExtensionMessage["email_context"]>): Omit<Task, "id" | "status" | "created_at">[] {
+  return result.tasks.map((task) => ({
+    email_id: context.id, email_subject: context.subject, email_sender: context.sender,
+    description: task.description, assignee: task.assignee,
+    due_date: task.due_date, priority: task.priority,
+  }));
 }
 
 // Set up alarms on install
@@ -167,6 +261,6 @@ chrome.runtime.onInstalled.addListener(() => {
 // Handle reminder alarms
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "followUpCheck") {
-    handleReminderCheck();
+    void handleReminderCheck().catch((error) => console.error("[MailX] Reminder check failed:", error));
   }
 });

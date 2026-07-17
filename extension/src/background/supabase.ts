@@ -1,11 +1,19 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient, Session, SupabaseClient } from "@supabase/supabase-js";
 import { Task, UserPreferences } from "../shared/types";
+import { clearLegacyCache, invalidateUserCache } from "../shared/cache";
 
 const SUPABASE_URL = "https://akespqwzlrsajibjheqg.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFrZXNwcXd6bHJzYWppYmpoZXFnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2OTU3MzMsImV4cCI6MjA5OTI3MTczM30.teIgOfx9PeqLHLJ6PYulgr2o0Y5VEcQMMe0rvKFD7fk";
 const DEV_STORAGE_KEY = "mailx_dev_user";
+const SESSION_TTL_MS = 20_000;
+const PREFERENCES_TTL_MS = 60_000;
 
 let client: SupabaseClient | null = null;
+let sessionMemory: { value: Session | null; expiresAt: number } | null = null;
+let sessionInFlight: Promise<Session | null> | null = null;
+let activeOwner: string | null = null;
+const preferencesMemory = new Map<string, { value: UserPreferences; expiresAt: number }>();
+const preferencesInFlight = new Map<string, Promise<UserPreferences>>();
 
 const chromeStorageAdapter = {
   getItem: async (key: string) => {
@@ -30,22 +38,50 @@ export function getSupabaseClient(): SupabaseClient {
         flowType: "pkce",
       },
     });
+    client.auth.onAuthStateChange((event, session) => {
+      const previousOwner = activeOwner;
+      const nextOwner = session?.user?.id || null;
+      sessionMemory = session ? { value: session, expiresAt: Date.now() + SESSION_TTL_MS } : null;
+      sessionInFlight = null;
+      preferencesMemory.clear();
+      preferencesInFlight.clear();
+      activeOwner = nextOwner;
+      if (previousOwner && (event === "SIGNED_OUT" || previousOwner !== nextOwner)) {
+        void invalidateUserCache(previousOwner);
+      }
+    });
   }
   return client;
 }
 
-export async function getSession() {
-  // Check real Supabase session first
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.getSession();
-  if (!error && data.session) return data.session;
+export async function getSession(): Promise<Session | null> {
+  if (sessionMemory && sessionMemory.expiresAt > Date.now()) return sessionMemory.value;
+  if (sessionInFlight) return sessionInFlight;
 
-  // Fallback: check dev mode
-  const dev = await chrome.storage.local.get(DEV_STORAGE_KEY);
-  if (dev[DEV_STORAGE_KEY]) {
-    return dev[DEV_STORAGE_KEY] as any;
+  sessionInFlight = (async () => {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.auth.getSession();
+    let session = !error && data.session ? data.session : null;
+    if (!session) {
+      const dev = await chrome.storage.local.get(DEV_STORAGE_KEY);
+      session = (dev[DEV_STORAGE_KEY] as Session | undefined) || null;
+    }
+    const previousOwner = activeOwner;
+    const nextOwner = session?.user?.id || null;
+    sessionMemory = { value: session, expiresAt: Date.now() + SESSION_TTL_MS };
+    activeOwner = nextOwner;
+    if (previousOwner && previousOwner !== nextOwner) {
+      preferencesMemory.clear();
+      preferencesInFlight.clear();
+      await invalidateUserCache(previousOwner);
+    }
+    return session;
+  })();
+  try {
+    return await sessionInFlight;
+  } finally {
+    sessionInFlight = null;
   }
-  return null;
 }
 
 export async function getUserId(): Promise<string | null> {
@@ -67,21 +103,39 @@ const defaultPreferences: UserPreferences = {
 
 export async function getPreferences(): Promise<UserPreferences> {
   const userId = await getUserId();
-  if (!userId) return defaultPreferences;
-  const { data, error } = await getSupabaseClient()
-    .from("preferences").select("reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist").eq("user_id", userId).maybeSingle();
-  if (error) throw error;
-  return { ...defaultPreferences, ...data };
+  if (!userId) return { ...defaultPreferences };
+  const cached = preferencesMemory.get(userId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const existing = preferencesInFlight.get(userId);
+  if (existing) return existing;
+  const request = (async () => {
+    const { data, error } = await getSupabaseClient()
+      .from("preferences").select("reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist").eq("user_id", userId).maybeSingle();
+    if (error) throw error;
+    const value = { ...defaultPreferences, ...data };
+    preferencesMemory.set(userId, { value, expiresAt: Date.now() + PREFERENCES_TTL_MS });
+    return value;
+  })();
+  preferencesInFlight.set(userId, request);
+  try {
+    return await request;
+  } finally {
+    preferencesInFlight.delete(userId);
+  }
 }
 
 export async function savePreferences(preferences: Partial<UserPreferences>): Promise<UserPreferences> {
   const userId = await getUserId();
   if (!userId) throw new Error("Sign in with Google to save preferences.");
-  const values = { user_id: userId, ...defaultPreferences, ...preferences, updated_at: new Date().toISOString() };
+  const current = await getPreferences();
+  const values = { user_id: userId, ...current, ...preferences, updated_at: new Date().toISOString() };
   const { data, error } = await getSupabaseClient().from("preferences")
     .upsert(values).select("reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist").single();
   if (error) throw error;
-  return data;
+  const value = { ...defaultPreferences, ...data };
+  preferencesMemory.set(userId, { value, expiresAt: Date.now() + PREFERENCES_TTL_MS });
+  await invalidateUserCache(userId);
+  return value;
 }
 
 export async function getTasks(): Promise<Task[]> {
@@ -150,6 +204,41 @@ export async function getReminders() {
   return data;
 }
 
+export async function getReminderTasks(): Promise<Pick<Task, "id" | "description" | "due_date" | "status">[]> {
+  const userId = await getUserId();
+  if (!userId) return [];
+  const { data, error } = await getSupabaseClient().from("tasks").select("id, description, due_date, status")
+    .eq("user_id", userId).eq("status", "pending").not("due_date", "is", null);
+  if (error) throw error;
+  return data;
+}
+
+export async function getReminderCount(): Promise<number> {
+  const userId = await getUserId();
+  if (!userId) return 0;
+  const { count, error } = await getSupabaseClient().from("reminders").select("id", { count: "exact", head: true })
+    .eq("user_id", userId).eq("dismissed", false).eq("resolved", false);
+  if (error) throw error;
+  return count || 0;
+}
+
+export async function getUnnotifiedReminders() {
+  const userId = await getUserId();
+  if (!userId) return [];
+  const { data, error } = await getSupabaseClient().from("reminders").select("id, subject, type")
+    .eq("user_id", userId).eq("dismissed", false).eq("resolved", false).is("notified_at", null);
+  if (error) throw error;
+  return data;
+}
+
+export async function markRemindersNotified(ids: string[]): Promise<void> {
+  const userId = await getUserId();
+  if (!userId || !ids.length) return;
+  const { error } = await getSupabaseClient().from("reminders").update({ notified_at: new Date().toISOString() })
+    .eq("user_id", userId).in("id", ids);
+  if (error) throw error;
+}
+
 export async function dismissReminder(id: string): Promise<void> {
   const userId = await getUserId();
   if (!userId) throw new Error("Sign in to manage reminders.");
@@ -158,27 +247,25 @@ export async function dismissReminder(id: string): Promise<void> {
   if (error) throw error;
 }
 
-export async function resolveReminders(sourceId: string, types?: string[]): Promise<void> {
+export async function resolveReminders(sourceIds: string | string[], types?: string[]): Promise<void> {
   const userId = await getUserId();
   if (!userId) return;
   let query = getSupabaseClient().from("reminders").update({ resolved: true })
-    .eq("user_id", userId).eq("source_id", sourceId).eq("resolved", false);
+    .eq("user_id", userId).eq("resolved", false);
+  query = Array.isArray(sourceIds) ? query.in("source_id", sourceIds) : query.eq("source_id", sourceIds);
   if (types?.length) query = query.in("type", types);
   const { error } = await query;
   if (error) throw error;
 }
 
-export async function upsertReminder(reminder: Record<string, unknown>): Promise<void> {
+export async function upsertReminders(reminders: Record<string, unknown>[]): Promise<void> {
   const userId = await getUserId();
-  if (!userId) return;
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.from("reminders").select("id")
-    .eq("user_id", userId).eq("type", reminder.type).eq("source_id", reminder.source_id).maybeSingle();
+  if (!userId || !reminders.length) return;
+  const { error } = await getSupabaseClient().from("reminders").upsert(
+    reminders.map((reminder) => ({ ...reminder, user_id: userId })),
+    { onConflict: "user_id,type,source_id", ignoreDuplicates: true },
+  );
   if (error) throw error;
-  if (!data) {
-    const { error: insertError } = await supabase.from("reminders").insert({ ...reminder, user_id: userId });
-    if (insertError) throw insertError;
-  }
 }
 
 export async function signInWithGoogle(): Promise<void> {
@@ -188,7 +275,7 @@ export async function signInWithGoogle(): Promise<void> {
     options: {
       skipBrowserRedirect: true,
       redirectTo: chrome.identity.getRedirectURL(),
-      scopes: "openid email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send",
+      scopes: "openid email profile https://www.googleapis.com/auth/gmail.readonly",
     },
   });
 
@@ -232,11 +319,26 @@ export async function devSignIn(email?: string): Promise<void> {
     token_type: "bearer",
   };
   await chrome.storage.local.set({ [DEV_STORAGE_KEY]: devUser });
+  const previousOwner = activeOwner;
+  sessionMemory = { value: devUser as Session, expiresAt: Date.now() + SESSION_TTL_MS };
+  sessionInFlight = null;
+  activeOwner = devUser.user.id;
+  preferencesMemory.clear();
+  preferencesInFlight.clear();
+  if (previousOwner && previousOwner !== activeOwner) await invalidateUserCache(previousOwner);
 }
 
 export async function signOut(): Promise<void> {
+  const owner = (await getSession())?.user?.id || activeOwner;
   const supabase = getSupabaseClient();
   await supabase.auth.signOut();
   await chrome.storage.local.remove("supabase.auth.token");
   await chrome.storage.local.remove(DEV_STORAGE_KEY);
+  sessionMemory = { value: null, expiresAt: Date.now() + SESSION_TTL_MS };
+  sessionInFlight = null;
+  activeOwner = null;
+  preferencesMemory.clear();
+  preferencesInFlight.clear();
+  if (owner) await invalidateUserCache(owner);
+  await clearLegacyCache();
 }

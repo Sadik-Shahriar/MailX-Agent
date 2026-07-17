@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { createStatsRequestGuard } from "./statsRequestGuard";
 
 type Tab = "inbox" | "stats" | "followups" | "settings";
 
@@ -11,6 +12,7 @@ export default function App() {
   const [stats, setStats] = useState<any>(null);
   const [statsError, setStatsError] = useState("");
   const [period, setPeriod] = useState<7 | 30 | 90>(7);
+  const statsRequests = useRef(createStatsRequestGuard());
   const [reminders, setReminders] = useState<any[]>([]);
   const [preferences, setPreferences] = useState({
     reply_tone: "professional",
@@ -51,6 +53,8 @@ export default function App() {
     });
   }
 
+  const showDevLogin = import.meta.env.DEV;
+
   async function handleDevSignIn() {
     setAuthError("");
     chrome.runtime.sendMessage({ type: "DEV_SIGN_IN" }, (res) => {
@@ -78,8 +82,11 @@ export default function App() {
   }, [activeTab, isLoggedIn, period]);
 
   function loadStats() {
+    const request = statsRequests.current.start();
+    setStats(null);
     setStatsError("");
     chrome.runtime.sendMessage({ type: "GET_STATS", period }, (data) => {
+      if (!statsRequests.current.isCurrent(request)) return;
       if (data?.error) setStatsError(data.error);
       else setStats(data);
     });
@@ -136,7 +143,7 @@ export default function App() {
         >
           Sign in with Google
         </button>
-        <button
+        {showDevLogin && <button
           onClick={handleDevSignIn}
           style={{
             border: "1px dashed #9ca3af",
@@ -149,7 +156,7 @@ export default function App() {
           }}
         >
           Dev Login (bypass OAuth)
-        </button>
+        </button>}
       </div>
     );
   }
@@ -187,7 +194,6 @@ export default function App() {
               <Score label="Emails received" value={stats.received} />
               <Score label="Tasks completed" value={stats.completedTasks} />
               <Score label="Tasks pending" value={stats.pendingTasks} />
-              <Score label="Important senders" value={stats.highPrioritySenders} />
             </div>}
           </div>
         )}

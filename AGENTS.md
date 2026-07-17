@@ -32,13 +32,13 @@ mailx/
 │       ├── background/      # Service Worker
 │       ├── content/         # Gmail DOM injection
 │       ├── popup/           # React SPA
-│       └── shared/          # Types, helpers, cache
+│       └── shared/          # Types, cache, telemetry
 ├── supabase/
 │   └── schema.sql
 ├── documents/
 │   ├── MailX_Revised_Architecture_Plan.md
-│   ├── MailX_All_10_FRs_Design_Document.md
-│   └── Team_A_SRS.md
+│   └── Old Architecture/    # Historical proposals, not release docs
+├── SETUP.md
 ├── AGENTS.md
 └── .gitignore
 ```
@@ -47,19 +47,19 @@ mailx/
 
 | FR | Feature | Status |
 |----|---------|--------|
-| FR1 | AI Email Summarization | ✅ Working |
-| FR2 | Smart Reply Suggestions | ✅ Working |
-| FR4 | Priority Detection | ✅ Working |
-| FR5 | Task & Deadline Extraction | ✅ Working |
-| FR6 | Follow-Up Reminder System | ✅ Implemented; requires Google OAuth/Gmail API configuration |
-| FR9 | AI Email Draft Generation | ✅ Working |
-| FR10 | Mail Statistics Analysis | ✅ Implemented; requires Google OAuth/Gmail API configuration |
+| FR1 | AI Email Summarization | Working |
+| FR2 | Smart Reply Suggestions | Working |
+| FR4 | Priority Detection | Working on explicit action only |
+| FR5 | Task & Deadline Extraction | Working |
+| FR6 | Follow-Up Reminder System | Requires Google OAuth/Gmail API configuration |
+| FR9 | AI Email Draft Generation | Working |
+| FR10 | Mail Statistics Analysis | Requires Google OAuth/Gmail API configuration |
 
 ## Setup for New Team Members
 
 ### Prerequisites
-- Node.js 18+
-- Python 3.10+
+- Node.js 22-24 with npm 10+
+- Python 3.13
 - Chrome browser
 - OpenCode CLI (for AI assistance)
 
@@ -75,7 +75,7 @@ cp .env.example .env   # Then edit .env with your API key
 
 # Extension
 cd ../extension
-npm install
+npm ci
 ```
 
 ### 2. Get an API Key
@@ -105,7 +105,7 @@ cd extension && npm run dev
 1. Go to `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked** → select `extension/dist/`
-4. Open Gmail → click MailX icon → **Dev Login**
+4. Open Gmail and sign in with Google. Dev Login is available only in development builds.
 
 ## Commands
 
@@ -116,9 +116,9 @@ cd extension && npm run dev
 
 ## Deferred
 
-FR3 (Open Tracking), FR7 (Spam), FR8 (Phishing) — cut from MVP scope.
+FR3 (Open Tracking) is deferred. Spam Check and Link Safety are advisory explicit actions, not automatic Gmail analysis.
 
 ## Supabase Project
 
-Connected via MCP. Tables: preferences, sender_scores, tasks, reminders, email_activity. All with RLS.
+Connected via MCP. Active tables: preferences, tasks, and reminders. All have RLS.
 Project ref: `akespqwzlrsajibjheqg`

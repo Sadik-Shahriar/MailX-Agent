@@ -3,11 +3,12 @@ services:
     name: mailx-api
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
     healthCheckPath: /health
     envVars:
       - key: ZEN_API_KEY
         sync: false
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      - key: MAILX_EXTENSION_ORIGINS
         sync: false
