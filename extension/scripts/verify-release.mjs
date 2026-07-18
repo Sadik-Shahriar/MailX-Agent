@@ -10,6 +10,10 @@ async function files(directory) {
 
 const releaseFiles = await files("dist");
 const text = await Promise.all(releaseFiles.map(async (file) => ({ file, content: await readFile(file, "utf8").catch(() => "") })));
+const manifest = JSON.parse(await readFile("dist/manifest.json", "utf8"));
+const insecurePermission = manifest.host_permissions?.find((permission) => permission.startsWith("http://"));
+if (insecurePermission) throw new Error(`Release manifest contains an insecure host permission: ${insecurePermission}`);
+
 const forbidden = /(?:localhost|127\.0\.0\.1|Dev Login|sourceMappingURL)/i;
 const violation = text.find(({ content }) => forbidden.test(content));
 if (violation) throw new Error(`Release output contains a forbidden development value: ${violation.file}`);

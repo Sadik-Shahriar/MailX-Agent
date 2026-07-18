@@ -1,0 +1,155 @@
+:root, :host {
+  color-scheme: light;
+
+  /* Typography */
+  --mx-font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  
+  --mx-type-xs: 12px;
+  --mx-lh-xs: 16px;
+  --mx-type-sm: 13px;
+  --mx-lh-sm: 18px;
+  --mx-type-body: 14px;
+  --mx-lh-body: 21px;
+  --mx-type-label: 14px;
+  --mx-lh-label: 20px;
+  --mx-type-title: 16px;
+  --mx-lh-title: 22px;
+  --mx-type-heading: 20px;
+  --mx-lh-heading: 26px;
+  --mx-type-metric: 24px;
+  --mx-lh-metric: 28px;
+
+  /* Spacing */
+  --mx-space-0-5: 2px;
+  --mx-space-1: 4px;
+  --mx-space-2: 8px;
+  --mx-space-3: 12px;
+  --mx-space-4: 16px;
+  --mx-space-5: 20px;
+  --mx-space-6: 24px;
+  --mx-space-8: 32px;
+
+  /* Radius */
+  --mx-radius-sm: 6px;
+  --mx-radius-md: 10px;
+  --mx-radius-lg: 14px;
+  --mx-radius-pill: 999px;
+
+  /* Shadow */
+  --mx-shadow-panel: 0 16px 40px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(15, 23, 42, 0.10);
+  --mx-shadow-dialog: 0 24px 64px rgba(15, 23, 42, 0.28);
+
+  /* Motion */
+  --mx-duration-fast: 120ms;
+  --mx-duration-base: 180ms;
+  --mx-duration-slow: 240ms;
+  --mx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --mx-ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Light Theme (default) */
+:root, :host, [data-theme="light"] {
+  --mx-bg: #F8FAFC;
+  --mx-surface: #FFFFFF;
+  --mx-surface-subtle: #F1F5F9;
+  --mx-surface-raised: #FFFFFF;
+  --mx-text: #0F172A;
+  --mx-text-secondary: #475569;
+  --mx-text-tertiary: #64748B;
+  --mx-divider: #E2E8F0;
+  --mx-control-border: #64748B;
+  --mx-primary: #2563EB;
+  --mx-on-primary: #FFFFFF;
+  --mx-primary-hover: #1D4ED8;
+  --mx-primary-soft: #DBEAFE;
+  --mx-on-primary-soft: #1E3A8A;
+  --mx-focus: #2563EB;
+  --mx-success: #047857;
+  --mx-success-soft: #D1FAE5;
+  --mx-warning: #B45309;
+  --mx-warning-soft: #FEF3C7;
+  --mx-danger: #B91C1C;
+  --mx-danger-soft: #FEE2E2;
+  --mx-scrim: rgba(15, 23, 42, 0.56);
+}
+
+/* Dark Theme */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]), :host:not([data-theme="light"]) {
+    --mx-bg: #0B1220;
+    --mx-surface: #111827;
+    --mx-surface-subtle: #1E293B;
+    --mx-surface-raised: #182235;
+    --mx-text: #F8FAFC;
+    --mx-text-secondary: #CBD5E1;
+    --mx-text-tertiary: #94A3B8;
+    --mx-divider: #334155;
+    --mx-control-border: #64748B;
+    --mx-primary: #60A5FA;
+    --mx-on-primary: #0B1220;
+    --mx-primary-hover: #93C5FD;
+    --mx-primary-soft: #172554;
+    --mx-on-primary-soft: #BFDBFE;
+    --mx-focus: #93C5FD;
+    --mx-success: #6EE7B7;
+    --mx-success-soft: #064E3B;
+    --mx-warning: #FCD34D;
+    --mx-warning-soft: #78350F;
+    --mx-danger: #FCA5A5;
+    --mx-danger-soft: #7F1D1D;
+    --mx-scrim: rgba(2, 6, 23, 0.72);
+  }
+}
+
+[data-theme="dark"], :host([data-theme="dark"]) {
+  color-scheme: dark;
+  --mx-bg: #0B1220;
+  --mx-surface: #111827;
+  --mx-surface-subtle: #1E293B;
+  --mx-surface-raised: #182235;
+  --mx-text: #F8FAFC;
+  --mx-text-secondary: #CBD5E1;
+  --mx-text-tertiary: #94A3B8;
+  --mx-divider: #334155;
+  --mx-control-border: #64748B;
+  --mx-primary: #60A5FA;
+  --mx-on-primary: #0B1220;
+  --mx-primary-hover: #93C5FD;
+  --mx-primary-soft: #172554;
+  --mx-on-primary-soft: #BFDBFE;
+  --mx-focus: #93C5FD;
+  --mx-success: #6EE7B7;
+  --mx-success-soft: #064E3B;
+  --mx-warning: #FCD34D;
+  --mx-warning-soft: #78350F;
+  --mx-danger: #FCA5A5;
+  --mx-danger-soft: #7F1D1D;
+  --mx-scrim: rgba(2, 6, 23, 0.72);
+}
+
+@media (forced-colors: active) {
+  :root, :host, [data-theme="light"], [data-theme="dark"] {
+    --mx-bg: Canvas;
+    --mx-surface: Canvas;
+    --mx-surface-subtle: Canvas;
+    --mx-surface-raised: Canvas;
+    --mx-text: CanvasText;
+    --mx-text-secondary: CanvasText;
+    --mx-text-tertiary: GrayText;
+    --mx-divider: CanvasText;
+    --mx-control-border: CanvasText;
+    --mx-primary: Highlight;
+    --mx-on-primary: HighlightText;
+    --mx-primary-hover: Highlight;
+    --mx-primary-soft: Highlight;
+    --mx-on-primary-soft: HighlightText;
+    --mx-focus: Highlight;
+    --mx-success: Highlight;
+    --mx-success-soft: Canvas;
+    --mx-warning: Highlight;
+    --mx-warning-soft: Canvas;
+    --mx-danger: Highlight;
+    --mx-danger-soft: Canvas;
+    --mx-scrim: Canvas;
+  }
+}

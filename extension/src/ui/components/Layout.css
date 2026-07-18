@@ -1,0 +1,18 @@
+.mx-card {
+  background-color: var(--mx-surface);
+  border-radius: var(--mx-radius-lg);
+  border: 1px solid var(--mx-divider);
+  padding: var(--mx-space-4);
+}
+.mx-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-4);
+}
+.mx-divider {
+  height: 1px;
+  background-color: var(--mx-divider);
+  width: 100%;
+  border: none;
+  margin: var(--mx-space-4) 0;
+}

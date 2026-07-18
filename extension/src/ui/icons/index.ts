@@ -1,0 +1,22 @@
+export {
+  House,
+  CheckSquare,
+  ChartBar,
+  Gear,
+  Sparkle,
+  PencilSimple,
+  ChatCircleText,
+  ListChecks,
+  SignOut,
+  X,
+  Warning,
+  WarningCircle,
+  CheckCircle,
+  Info,
+  ShieldCheck,
+  ShieldWarning,
+  CaretLeft,
+  CaretRight,
+  CaretDown,
+  CaretUp
+} from '@phosphor-icons/react';

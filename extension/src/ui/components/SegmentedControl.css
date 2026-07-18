@@ -1,0 +1,29 @@
+.mx-segmented-control {
+  display: inline-flex;
+  background-color: var(--mx-surface-subtle);
+  border-radius: var(--mx-radius-md);
+  padding: var(--mx-space-1);
+}
+.mx-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--mx-space-2) var(--mx-space-4);
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--mx-radius-md) - var(--mx-space-1));
+  color: var(--mx-text-secondary);
+  font-family: var(--mx-font-family);
+  font-size: var(--mx-type-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--mx-duration-fast) var(--mx-ease-out);
+}
+.mx-segment:hover {
+  color: var(--mx-text);
+}
+.mx-segment-active {
+  background-color: var(--mx-surface);
+  color: var(--mx-text);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}

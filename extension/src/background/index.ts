@@ -220,6 +220,8 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
     case "FIND_PANEL": {
       const tabs = await chrome.tabs.query({ url: "*://mail.google.com/*" });
       if (!tabs.length || !tabs[0].id) throw new Error("Open Gmail to find the MailX panel.");
+      if (tabs[0].windowId !== undefined) await chrome.windows.update(tabs[0].windowId, { focused: true });
+      await chrome.tabs.update(tabs[0].id, { active: true });
       await chrome.tabs.sendMessage(tabs[0].id, { type: "FIND_PANEL" });
       return { found: true };
     }

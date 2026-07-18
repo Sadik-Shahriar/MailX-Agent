@@ -1,0 +1,37 @@
+/* Layout structures */
+.mx-stack {
+  display: flex;
+  flex-direction: column;
+}
+.mx-stack-gap-1 { gap: var(--mx-space-1); }
+.mx-stack-gap-2 { gap: var(--mx-space-2); }
+.mx-stack-gap-3 { gap: var(--mx-space-3); }
+.mx-stack-gap-4 { gap: var(--mx-space-4); }
+
+.mx-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+.mx-row-gap-1 { gap: var(--mx-space-1); }
+.mx-row-gap-2 { gap: var(--mx-space-2); }
+.mx-row-gap-3 { gap: var(--mx-space-3); }
+.mx-row-gap-4 { gap: var(--mx-space-4); }
+.mx-row-between { justify-content: space-between; }
+
+/* Primitive Animations */
+@keyframes mx-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.mx-animate-spin {
+  animation: mx-spin 1s linear infinite;
+}
+
+@keyframes mx-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}
+.mx-animate-pulse {
+  animation: mx-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

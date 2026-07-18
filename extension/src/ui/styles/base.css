@@ -1,0 +1,80 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--mx-font-family);
+  background-color: var(--mx-bg);
+  color: var(--mx-text);
+  font-size: var(--mx-type-body);
+  line-height: var(--mx-lh-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--mx-focus);
+  outline-offset: 2px;
+}
+
+/* Typography utilities */
+.mx-text-xs { font-size: var(--mx-type-xs); line-height: var(--mx-lh-xs); font-weight: 400; }
+.mx-text-sm { font-size: var(--mx-type-sm); line-height: var(--mx-lh-sm); font-weight: 400; }
+.mx-text-body { font-size: var(--mx-type-body); line-height: var(--mx-lh-body); font-weight: 400; }
+.mx-text-label { font-size: var(--mx-type-label); line-height: var(--mx-lh-label); font-weight: 600; }
+.mx-text-title { font-size: var(--mx-type-title); line-height: var(--mx-lh-title); font-weight: 600; }
+.mx-text-heading { font-size: var(--mx-type-heading); line-height: var(--mx-lh-heading); font-weight: 700; }
+.mx-text-metric { font-size: var(--mx-type-metric); line-height: var(--mx-lh-metric); font-weight: 700; font-variant-numeric: tabular-nums; }
+.mx-text-secondary { color: var(--mx-text-secondary); }
+.mx-text-tertiary { color: var(--mx-text-tertiary); }
+
+/* Reduced motion fallback */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+
+  input, select, textarea, .mx-input, .mx-checkbox, .mx-segmented-control,
+  .mx-segment-active, .mx-dialog, .mx-btn, .mx-tab-active {
+    border: 1px solid CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  .mx-checkbox {
+    appearance: auto;
+  }
+
+  .mx-checkbox::before {
+    content: none;
+  }
+
+  .mx-checkbox:checked, .mx-segment-active, .mx-tab-active {
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+  }
+
+  .mx-dialog-overlay {
+    background: Canvas;
+  }
+}

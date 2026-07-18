@@ -1,0 +1,98 @@
+.mx-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mx-space-1);
+}
+.mx-field-label {
+  font-family: var(--mx-font-family);
+  font-size: var(--mx-type-sm);
+  line-height: var(--mx-lh-sm);
+  font-weight: 600;
+  color: var(--mx-text);
+}
+.mx-field-helper {
+  font-family: var(--mx-font-family);
+  font-size: var(--mx-type-xs);
+  line-height: var(--mx-lh-xs);
+  color: var(--mx-text-secondary);
+}
+.mx-field-error {
+  font-family: var(--mx-font-family);
+  font-size: var(--mx-type-xs);
+  line-height: var(--mx-lh-xs);
+  color: var(--mx-danger);
+}
+
+.mx-input {
+  font-family: var(--mx-font-family);
+  font-size: var(--mx-type-body);
+  line-height: var(--mx-lh-body);
+  color: var(--mx-text);
+  background-color: var(--mx-surface);
+  border: 1px solid var(--mx-control-border);
+  border-radius: var(--mx-radius-sm);
+  padding: var(--mx-space-2) var(--mx-space-3);
+  width: 100%;
+  transition: border-color var(--mx-duration-fast) var(--mx-ease-out);
+}
+.mx-input:focus-visible {
+  outline: none;
+  border-color: var(--mx-primary);
+  box-shadow: 0 0 0 2px var(--mx-focus);
+}
+.mx-input[aria-invalid="true"] {
+  border-color: var(--mx-danger);
+}
+.mx-input:disabled {
+  background-color: var(--mx-surface-subtle);
+  color: var(--mx-text-tertiary);
+  cursor: not-allowed;
+}
+
+.mx-checkbox-container {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mx-space-3);
+}
+.mx-checkbox {
+  appearance: none;
+  background-color: var(--mx-surface);
+  margin: 0;
+  font: inherit;
+  color: currentColor;
+  width: 1.15em;
+  height: 1.15em;
+  border: 1px solid var(--mx-control-border);
+  border-radius: 4px;
+  display: grid;
+  place-content: center;
+  transition: all 120ms ease-out;
+  cursor: pointer;
+  margin-top: 2px;
+}
+.mx-checkbox::before {
+  content: "";
+  width: 0.65em;
+  height: 0.65em;
+  transform: scale(0);
+  transition: 120ms transform ease-in-out;
+  box-shadow: inset 1em 1em var(--mx-on-primary);
+  transform-origin: center;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+.mx-checkbox:checked {
+  background-color: var(--mx-primary);
+  border-color: var(--mx-primary);
+}
+.mx-checkbox:checked::before {
+  transform: scale(1);
+}
+.mx-checkbox:disabled {
+  background-color: var(--mx-surface-subtle);
+  border-color: var(--mx-divider);
+  cursor: not-allowed;
+}
+.mx-checkbox:focus-visible {
+  outline: 2px solid var(--mx-focus);
+  outline-offset: 2px;
+}

@@ -1,0 +1,49 @@
+.mx-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: var(--mx-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: var(--mx-space-4);
+}
+.mx-dialog {
+  background-color: var(--mx-surface);
+  border-radius: var(--mx-radius-lg);
+  box-shadow: var(--mx-shadow-dialog);
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  animation: mx-dialog-enter var(--mx-duration-base) var(--mx-ease-out);
+}
+.mx-dialog:focus-visible {
+  outline: 2px solid var(--mx-focus);
+  outline-offset: 2px;
+}
+@keyframes mx-dialog-enter {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.mx-dialog-header {
+  padding: var(--mx-space-4) var(--mx-space-4) var(--mx-space-2);
+  font-family: var(--mx-font-family);
+  font-size: var(--mx-type-title);
+  line-height: var(--mx-lh-title);
+  font-weight: 700;
+  color: var(--mx-text);
+}
+.mx-dialog-body {
+  padding: 0 var(--mx-space-4);
+  font-family: var(--mx-font-family);
+  font-size: var(--mx-type-body);
+  line-height: var(--mx-lh-body);
+  color: var(--mx-text-secondary);
+}
+.mx-dialog-footer {
+  padding: var(--mx-space-4);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--mx-space-3);
+}

@@ -13,7 +13,6 @@
   "host_permissions": [
     "https://mail.google.com/*",
     "https://gmail.googleapis.com/*",
-    "http://localhost:8001/*",
     "https://akespqwzlrsajibjheqg.supabase.co/*"
   ],
   "background": {

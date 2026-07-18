@@ -1,479 +1,178 @@
-import React, { useState, useEffect, useRef } from "react";
-import { createStatsRequestGuard } from "./statsRequestGuard";
-import type { Task } from "../shared/types";
+import React, { useState, useEffect, useContext, useRef } from "react";
+import { ToastProvider, Spinner, ToastContext } from "../ui/components/Feedback";
+import { Tabs } from "../ui/components/Tabs";
+import { AuthView } from "../ui/features/auth/AuthView";
+import { HomeView } from "./views/HomeView";
+import { TasksView } from "../ui/features/tasks/TasksView";
+import { InsightsView } from "../ui/features/insights/InsightsView";
+import { SettingsView } from "./views/SettingsView";
+import { sendMessage } from "../ui/runtime/sendMessage";
 
-type Tab = "inbox" | "tasks" | "stats" | "settings";
+type TabId = "inbox" | "tasks" | "stats" | "settings";
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>("inbox");
+function AppShell() {
+  const [activeTab, setActiveTab] = useState<TabId>("inbox");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userEmail, setUserEmail] = useState("");
   const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState("");
-  const [stats, setStats] = useState<any>(null);
-  const [statsError, setStatsError] = useState("");
-  const [period, setPeriod] = useState<7 | 30 | 90>(7);
-  const statsRequests = useRef(createStatsRequestGuard());
-  const [reminders, setReminders] = useState<any[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [tasksLoading, setTasksLoading] = useState(false);
-  const [tasksError, setTasksError] = useState("");
-  const [preferences, setPreferences] = useState({
-    reply_tone: "professional",
-    reminder_delay_days: 3,
-    reminder_notify_before: true,
-    reminder_notify_due: true,
-    reminder_notify_overdue: false,
-  });
+  const [authRecovery, setAuthRecovery] = useState(false);
+  const [statusError, setStatusError] = useState("");
+  const isLoggedInRef = useRef(false);
+
+  const toastContext = useContext(ToastContext);
+  const showToast = toastContext?.showToast || (() => {});
 
   useEffect(() => {
     checkAuth();
+    const handleStorageChange = (changes: { [key: string]: chrome.storage.StorageChange }, area: string) => {
+      if (area === "local" && changes.mailx_auth_sync) {
+        checkAuth(changes.mailx_auth_sync.newValue?.signedOut === true);
+      }
+    };
+    chrome.storage.onChanged.addListener(handleStorageChange);
+    return () => chrome.storage.onChanged.removeListener(handleStorageChange);
   }, []);
 
-  async function checkAuth() {
+  function setSignedOut() {
+    isLoggedInRef.current = false;
+    setIsLoggedIn(false);
+    setUserEmail("");
+    setAuthRecovery(false);
+  }
+
+  function syncAuth(signedOut: boolean) {
+    chrome.storage.local.set({ mailx_auth_sync: { changedAt: Date.now(), signedOut } });
+  }
+
+  async function checkAuth(signedOut = false) {
     setLoading(true);
+    setStatusError("");
     try {
-      chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
-        if (res?.loggedIn) {
-          setIsLoggedIn(true);
-          setUserEmail(res.email || "");
-        }
-        setLoading(false);
-      });
-    } catch {
+      const res = await sendMessage({ type: "GET_STATUS" });
+      if (res?.loggedIn) {
+        isLoggedInRef.current = true;
+        setIsLoggedIn(true);
+        setUserEmail(res.email || "");
+        setAuthRecovery(false);
+      } else if (signedOut || !isLoggedInRef.current) {
+        setSignedOut();
+      } else {
+        setAuthRecovery(true);
+      }
+    } catch (err: any) {
+      const message = err.message || "We could not confirm your account connection. Check your connection and try again.";
+      if (isLoggedInRef.current) {
+        setAuthRecovery(true);
+        setStatusError(message);
+      } else {
+        setStatusError(message);
+      }
+    } finally {
       setLoading(false);
     }
   }
 
-  async function handleSignIn() {
-    setAuthError("");
-    chrome.runtime.sendMessage({ type: "SIGN_IN" }, (res) => {
-      if (res?.loggedIn) {
-        setIsLoggedIn(true);
-        setUserEmail(res.email);
-      } else if (res?.error) {
-        setAuthError(res.error);
-      }
-    });
-  }
-
-  const showDevLogin = import.meta.env.DEV;
-
-  async function handleDevSignIn() {
-    setAuthError("");
-    chrome.runtime.sendMessage({ type: "DEV_SIGN_IN" }, (res) => {
-      if (res?.loggedIn) {
-        setIsLoggedIn(true);
-        setUserEmail(res.email);
-      } else if (res?.error) {
-        setAuthError(res.error);
-      }
-    });
-  }
-
   async function handleSignOut() {
-    chrome.runtime.sendMessage({ type: "SIGN_OUT" }, () => {
-      setIsLoggedIn(false);
-      setUserEmail("");
-    });
+    try {
+      await sendMessage({ type: "SIGN_OUT" });
+      setSignedOut();
+      syncAuth(true);
+      showToast("Signed out successfully", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to sign out", "error");
+    }
   }
 
-  async function findPanel() {
-    chrome.tabs.query({ url: "*://mail.google.com/*" }, (tabs) => {
+  async function handleFindPanel() {
+    chrome.tabs.query({ url: "*://mail.google.com/*" }, async (tabs) => {
       if (!tabs.length) {
         chrome.tabs.create({ url: "https://mail.google.com" });
         return;
       }
-      chrome.runtime.sendMessage({ type: "FIND_PANEL" }, (res) => {
-        if (res?.error) alert(res.error);
-      });
-    });
-  }
-
-  useEffect(() => {
-    if (!isLoggedIn) return;
-    if (activeTab === "stats") loadStats();
-    if (activeTab === "tasks") { loadTasks(); loadReminders(); }
-    if (activeTab === "settings") chrome.runtime.sendMessage({ type: "GET_PREFERENCES" }, (data) => data && setPreferences(data));
-  }, [activeTab, isLoggedIn, period]);
-
-  function loadStats() {
-    const request = statsRequests.current.start();
-    setStats(null);
-    setStatsError("");
-    chrome.runtime.sendMessage({ type: "GET_STATS", period, refresh: true }, (data) => {
-      if (!statsRequests.current.isCurrent(request)) return;
-      if (data?.error) setStatsError(data.error);
-      else setStats(data);
-    });
-  }
-
-  function loadReminders() {
-    chrome.runtime.sendMessage({ type: "GET_REMINDERS" }, (data) => setReminders(data?.reminders || []));
-  }
-
-  function loadTasks() {
-    setTasksLoading(true);
-    setTasksError("");
-    chrome.runtime.sendMessage({ type: "GET_TASKS", period }, (data) => {
-      setTasksLoading(false);
-      if (chrome.runtime.lastError || data?.error) {
-        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not load tasks.");
-        return;
+      try {
+        await sendMessage({ type: "FIND_PANEL" });
+      } catch (err: any) {
+        showToast(err.message || "Failed to find panel", "error");
       }
-      setTasks(Array.isArray(data?.tasks) ? data.tasks : []);
     });
-  }
-
-  function toggleTask(id: string) {
-    chrome.runtime.sendMessage({ type: "TOGGLE_TASK", task_id: id, period }, (data) => {
-      if (chrome.runtime.lastError || data?.error) {
-        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not update task.");
-        return;
-      }
-      if (Array.isArray(data?.tasks)) setTasks(data.tasks);
-    });
-  }
-
-  function deleteCompletedTask(id: string) {
-    chrome.runtime.sendMessage({ type: "DELETE_TASK", task_id: id, period }, (data) => {
-      if (chrome.runtime.lastError || data?.error) {
-        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not delete task.");
-        return;
-      }
-      if (Array.isArray(data?.tasks)) setTasks(data.tasks);
-    });
-  }
-
-  function deleteAllCompletedTasks() {
-    if (!window.confirm("Delete all completed tasks? Their completion history will remain in Statistics.")) return;
-    chrome.runtime.sendMessage({ type: "DELETE_COMPLETED_TASKS", period }, (data) => {
-      if (chrome.runtime.lastError || data?.error) {
-        setTasksError(chrome.runtime.lastError?.message || data?.error || "Could not delete completed tasks.");
-        return;
-      }
-      if (Array.isArray(data?.tasks)) setTasks(data.tasks);
-    });
-  }
-
-  function dismissReminder(id: string) {
-    chrome.runtime.sendMessage({ type: "DISMISS_REMINDER", reminder_id: id }, loadReminders);
-  }
-
-  function saveCurrentPreferences() {
-    chrome.runtime.sendMessage({ type: "SAVE_PREFERENCES", preferences });
   }
 
   if (loading) {
     return (
-      <div style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>
-        Loading...
+      <div role="status" aria-label="Loading MailX" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: 200, color: "var(--mx-text-secondary)" }}>
+        <Spinner />
       </div>
     );
   }
 
   if (!isLoggedIn) {
     return (
-      <div style={{ padding: 24, textAlign: "center" }}>
-        <h1 style={{ fontSize: 20, marginBottom: 4 }}>MailX</h1>
-        <p style={{ color: "#6b7280", marginBottom: 4, fontSize: 13 }}>
-          AI-powered Gmail assistant
-        </p>
-        <p style={{ color: "#9ca3af", marginBottom: 16, fontSize: 12 }}>
-          Summarize &bull; Reply &bull; Draft &bull; Prioritize &bull; Tasks
-        </p>
-        {authError && (
-          <p style={{ color: "#dc2626", marginBottom: 12, fontSize: 12 }}>
-            {authError}
-          </p>
-        )}
-        <button
-          onClick={handleSignIn}
-          style={{
-            padding: "10px 24px",
-            background: "#1f2937",
-            color: "white",
-            border: "none",
-            borderRadius: 6,
-            cursor: "pointer",
-            fontSize: 14,
-            display: "block",
-            margin: "0 auto 8px",
-          }}
-        >
-          Sign in with Google
-        </button>
-        {showDevLogin && <button
-          onClick={handleDevSignIn}
-          style={{
-            border: "1px dashed #9ca3af",
-            background: "transparent",
-            padding: "6px 16px",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontSize: 11,
-            color: "#9ca3af",
-          }}
-        >
-          Dev Login (bypass OAuth)
-        </button>}
-      </div>
+      <AuthView
+        statusError={statusError}
+        onRetryStatus={() => checkAuth()}
+        onSuccess={(email) => {
+          isLoggedInRef.current = true;
+          setIsLoggedIn(true);
+          setUserEmail(email);
+          setAuthRecovery(false);
+          setStatusError("");
+          syncAuth(false);
+        }}
+      />
     );
   }
 
   return (
-    <div>
-      <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
-      <div style={{ padding: 16, fontSize: 13 }}>
-        {activeTab === "inbox" && (
-          <div>
-            <p style={{ color: "#6b7280", marginBottom: 12 }}>
-              Signed in as <strong>{userEmail}</strong>
-            </p>
-            <p style={{ color: "#374151", marginBottom: 8 }}>
-              Open an email in Gmail and use the MailX toolbar buttons:
-            </p>
-            <ul style={{ paddingLeft: 20, color: "#6b7280", lineHeight: 1.8 }}>
-              <li><strong>Summarize</strong> &mdash; AI summary of the email</li>
-              <li><strong>Reply</strong> &mdash; Smart reply suggestions</li>
-              <li><strong>Draft</strong> &mdash; AI-generated draft reply</li>
-              <li><strong>Priority</strong> &mdash; Detect priority level</li>
-              <li><strong>Tasks</strong> &mdash; Extract tasks & deadlines</li>
-            </ul>
-            <button
-              onClick={findPanel}
-              style={{
-                marginTop: 14,
-                padding: "8px 16px",
-                border: "1px solid #facc15",
-                borderRadius: 6,
-                background: "#fef9c3",
-                color: "#854d0e",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: 600,
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                width: "100%",
-                justifyContent: "center",
+    <div className="mx-popup-shell">
+      <Tabs
+        activeTab={activeTab}
+        onChange={(id) => setActiveTab(id as TabId)}
+        tabs={[
+          { id: "inbox", label: "Home" },
+          { id: "tasks", label: "Tasks" },
+          { id: "stats", label: "Insights" },
+          { id: "settings", label: "Settings" }
+        ]}
+      />
+      <div className="mx-popup-main">
+        {authRecovery && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 1, background: "var(--mx-surface)", overflowY: "auto" }}>
+            <AuthView
+              reconnect
+              statusError={statusError}
+              onRetryStatus={() => checkAuth()}
+              onSuccess={(email) => {
+                isLoggedInRef.current = true;
+                setIsLoggedIn(true);
+                setUserEmail(email);
+                setAuthRecovery(false);
+                setStatusError("");
+                syncAuth(false);
               }}
-            >
-              <span style={{ fontSize: 16 }}>🔍</span> Find me
-            </button>
+            />
           </div>
         )}
-        {activeTab === "tasks" && (
-          <TasksView tasks={tasks} reminders={reminders} period={period} loading={tasksLoading} error={tasksError} onPeriodChange={setPeriod} onToggle={toggleTask} onDelete={deleteCompletedTask} onDeleteAll={deleteAllCompletedTasks} onDismissReminder={dismissReminder} />
-        )}
-        {activeTab === "stats" && (
-          <div>
-            <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
-              {[7, 30, 90].map((days) => <button key={days} onClick={() => setPeriod(days as 7 | 30 | 90)} style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 4, padding: 5, background: period === days ? "#1f2937" : "white", color: period === days ? "white" : "#374151" }}>Last {days}d</button>)}
-            </div>
-            {statsError && <p style={{ color: "#dc2626", fontSize: 12 }}>{statsError}</p>}
-            {!stats && !statsError && <p style={{ color: "#9ca3af" }}>Loading statistics...</p>}
-            {stats && <StatsView stats={stats} />}
-          </div>
-        )}
-        {activeTab === "settings" && (
-          <div>
-            <label style={{ display: "block", marginBottom: 12 }}>Reply tone<br /><select value={preferences.reply_tone} onChange={(event) => setPreferences({ ...preferences, reply_tone: event.target.value })}><option value="professional">Professional</option><option value="formal">Formal</option><option value="casual">Casual</option></select></label>
-            <label style={{ display: "block", marginBottom: 12 }}>Remind after days<br /><input type="number" min="1" max="30" value={preferences.reminder_delay_days} onChange={(event) => setPreferences({ ...preferences, reminder_delay_days: Number(event.target.value) })} /></label>
-            <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={preferences.reminder_notify_before} onChange={(event) => setPreferences({ ...preferences, reminder_notify_before: event.target.checked })} /> Notify one day before a task is due</label>
-            <label style={{ display: "block", marginBottom: 8 }}><input type="checkbox" checked={preferences.reminder_notify_due} onChange={(event) => setPreferences({ ...preferences, reminder_notify_due: event.target.checked })} /> Notify when a task is due</label>
-            <label style={{ display: "block", marginBottom: 12 }}><input type="checkbox" checked={preferences.reminder_notify_overdue} onChange={(event) => setPreferences({ ...preferences, reminder_notify_overdue: event.target.checked })} /> Notify when a task is overdue</label>
-            <button onClick={saveCurrentPreferences} style={{ padding: "6px 12px", border: 0, borderRadius: 4, background: "#1a73e8", color: "white", cursor: "pointer" }}>Save settings</button>
-          </div>
-        )}
-        <div style={{ marginTop: 16, textAlign: "center" }}>
-          <button
-            onClick={handleSignOut}
-            style={{
-              border: "1px solid #d1d5db",
-              background: "white",
-              padding: "6px 16px",
-              borderRadius: 4,
-              cursor: "pointer",
-              fontSize: 12,
-              color: "#6b7280",
-            }}
-          >
-            Sign Out
-          </button>
+        <div role="tabpanel" id="panel-inbox" aria-labelledby="tab-inbox" hidden={activeTab !== "inbox"}>
+          {activeTab === "inbox" && <HomeView userEmail={userEmail} onFindPanel={handleFindPanel} />}
+        </div>
+        <div role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks" hidden={activeTab !== "tasks"}>
+          {activeTab === "tasks" && <TasksView />}
+        </div>
+        <div role="tabpanel" id="panel-stats" aria-labelledby="tab-stats" hidden={activeTab !== "stats"}>
+          {activeTab === "stats" && <InsightsView />}
+        </div>
+        <div role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" hidden={activeTab !== "settings"}>
+          {activeTab === "settings" && <SettingsView userEmail={userEmail} onSignOut={handleSignOut} />}
         </div>
       </div>
     </div>
   );
 }
 
-function TabBar({ activeTab, onTabChange }: {
-  activeTab: Tab;
-  onTabChange: (t: Tab) => void;
-}) {
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "inbox", label: "Inbox" },
-    { id: "tasks", label: "Tasks" },
-    { id: "stats", label: "Stats" },
-    { id: "settings", label: "Settings" },
-  ];
-
+export default function App() {
   return (
-    <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb" }}>
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => onTabChange(tab.id)}
-          style={{
-            flex: 1,
-            padding: "10px 0",
-            border: "none",
-            background: activeTab === tab.id ? "#f3f4f6" : "transparent",
-            cursor: "pointer",
-            fontSize: 13,
-            fontWeight: activeTab === tab.id ? 600 : 400,
-            color: activeTab === tab.id ? "#1f2937" : "#6b7280",
-            borderBottom: activeTab === tab.id ? "2px solid #1f2937" : "2px solid transparent",
-          }}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function TasksView({
-  tasks,
-  reminders,
-  period,
-  loading,
-  error,
-  onPeriodChange,
-  onToggle,
-  onDelete,
-  onDeleteAll,
-  onDismissReminder,
-}: {
-  tasks: Task[];
-  reminders: any[];
-  period: 7 | 30 | 90;
-  loading: boolean;
-  error: string;
-  onPeriodChange: (period: 7 | 30 | 90) => void;
-  onToggle: (id: string) => void;
-  onDelete: (id: string) => void;
-  onDeleteAll: () => void;
-  onDismissReminder: (id: string) => void;
-}) {
-  const visibleTasks = tasks.filter((task) => task.status === "pending" || task.status === "completed");
-  const pending = visibleTasks.filter((task) => task.status === "pending");
-  const completed = visibleTasks.filter((task) => task.status === "completed");
-
-  if (loading) return <p style={{ color: "#9ca3af" }}>Loading tasks...</p>;
-  if (error) return <p style={{ color: "#dc2626", fontSize: 12 }}>{error}</p>;
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
-        {[7, 30, 90].map((days) => <button key={days} onClick={() => onPeriodChange(days as 7 | 30 | 90)} style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 4, padding: 5, background: period === days ? "#1f2937" : "white", color: period === days ? "white" : "#374151" }}>{days}d</button>)}
-      </div>
-      {!visibleTasks.length && !reminders.length && <p style={{ color: "#9ca3af" }}>No tasks or follow-ups in the last {period} days.</p>}
-      {reminders.length > 0 && (
-        <section style={{ marginBottom: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <h2 style={{ fontSize: 13, margin: 0, color: "#374151" }}>Follow-ups ({reminders.length})</h2>
-          </div>
-          {reminders.map((reminder) => (
-            <div key={reminder.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "8px 0" }}>
-              <strong style={{ display: "block", fontSize: 13 }}>{reminder.subject}</strong>
-              <span style={{ color: "#6b7280", fontSize: 11 }}>{reminder.type.replaceAll("_", " ")}</span>
-              <button onClick={() => onDismissReminder(reminder.id)} style={{ float: "right", border: 0, background: "transparent", color: "#1a73e8", cursor: "pointer", fontSize: 12 }}>Dismiss</button>
-            </div>
-          ))}
-        </section>
-      )}
-      <TaskSection title={`To do (${pending.length})`} tasks={pending} onToggle={onToggle} />
-      <TaskSection title={`Completed (${completed.length})`} tasks={completed} onToggle={onToggle} onDelete={onDelete} onDeleteAll={onDeleteAll} />
-    </div>
-  );
-}
-
-function TaskSection({
-  title,
-  tasks,
-  onToggle,
-  onDelete,
-  onDeleteAll,
-}: {
-  title: string;
-  tasks: Task[];
-  onToggle: (id: string) => void;
-  onDelete?: (id: string) => void;
-  onDeleteAll?: () => void;
-}) {
-  return (
-    <section style={{ marginBottom: 16 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <h2 style={{ fontSize: 13, margin: 0, color: "#374151" }}>{title}</h2>
-        {onDeleteAll && tasks.length > 0 && <button type="button" onClick={onDeleteAll} style={{ border: "1px solid #fecaca", borderRadius: 4, padding: "3px 7px", background: "#fff7f7", color: "#b91c1c", cursor: "pointer", fontSize: 11 }}>Delete all</button>}
-      </div>
-      {!tasks.length && <p style={{ color: "#9ca3af", fontSize: 12 }}>None</p>}
-      {tasks.map((task) => (
-        <label key={task.id} style={{ display: "block", padding: "9px 0", borderBottom: "1px solid #e5e7eb", cursor: "pointer" }}>
-          <input type="checkbox" checked={task.status === "completed"} onChange={() => onToggle(task.id)} />
-          <span style={{ marginLeft: 8, textDecoration: task.status === "completed" ? "line-through" : "none" }}>{task.description}</span>
-          <small style={{ display: "block", margin: "4px 0 0 24px", color: "#6b7280" }}>
-            {task.due_date ? `Due ${task.due_date}` : "No due date"} · {task.priority} priority
-          </small>
-          {task.status === "completed" && onDelete && <button type="button" onClick={(event) => { event.preventDefault(); onDelete(task.id); }} style={{ margin: "6px 0 0 24px", border: "1px solid #fecaca", borderRadius: 4, padding: "3px 7px", background: "#fff7f7", color: "#b91c1c", cursor: "pointer", fontSize: 11 }}>Delete</button>}
-        </label>
-      ))}
-    </section>
-  );
-}
-
-function Score({ label, value }: { label: string; value: number }) {
-  return <div style={{ background: "#f3f4f6", borderRadius: 6, padding: 10 }}><strong style={{ display: "block", fontSize: 19 }}>{value}</strong><span style={{ color: "#6b7280", fontSize: 11 }}>{label}</span></div>;
-}
-
-function StatsView({ stats }: { stats: any }) {
-  return (
-    <div>
-      <BarChart title="Emails" items={[
-        { label: "Sent", value: stats.sent, color: "#1a73e8" },
-        { label: "Received", value: stats.received, color: "#059669" },
-      ]} />
-      <BarChart title="Tasks" items={[
-        { label: "Completed", value: stats.completedTasks, color: "#7c3aed" },
-        { label: "Pending", value: stats.pendingTasks, color: "#d97706" },
-      ]} />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4 }}>
-        <Score label="Emails sent" value={stats.sent} />
-        <Score label="Emails received" value={stats.received} />
-        <Score label="Tasks completed" value={stats.completedTasks} />
-        <Score label="Tasks pending" value={stats.pendingTasks} />
-      </div>
-    </div>
-  );
-}
-
-function BarChart({ title, items }: { title: string; items: { label: string; value: number; color: string }[] }) {
-  const max = Math.max(...items.map(i => i.value), 1);
-  return (
-    <div style={{ marginBottom: 14, padding: "0 2px" }}>
-      <h3 style={{ fontSize: 12, margin: "0 0 8px", color: "#374151", fontWeight: 600 }}>{title}</h3>
-      {items.map(item => (
-        <div key={item.label} style={{ marginBottom: 7 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b7280", marginBottom: 3 }}>
-            <span>{item.label}</span>
-            <span style={{ fontWeight: 600, color: "#374151" }}>{item.value}</span>
-          </div>
-          <div style={{ height: 10, background: "#f3f4f6", borderRadius: 5, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${Math.min((item.value / max) * 100, 100)}%`, background: item.color, borderRadius: 5, transition: "width 0.4s ease" }} />
-          </div>
-        </div>
-      ))}
-    </div>
+    <ToastProvider>
+      <AppShell />
+    </ToastProvider>
   );
 }

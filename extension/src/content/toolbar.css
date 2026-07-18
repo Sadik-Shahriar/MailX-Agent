@@ -1,0 +1,112 @@
+.mailx-message-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mx-space-2);
+  margin: 0 0 10px;
+  padding: var(--mx-space-2);
+  border: 1px solid var(--mx-divider);
+  border-radius: var(--mx-radius-md);
+  background: var(--mx-surface-subtle);
+}
+
+.mailx-message-toolbar button {
+  border: 1px solid var(--mx-divider);
+  border-radius: var(--mx-radius-sm);
+  padding: var(--mx-space-1) var(--mx-space-2);
+  background: var(--mx-surface);
+  color: var(--mx-text-secondary);
+  cursor: pointer;
+  font: 600 var(--mx-type-xs) var(--mx-font-family);
+  transition: transform var(--mx-duration-fast) var(--mx-ease-out), background var(--mx-duration-fast) var(--mx-ease-out), color var(--mx-duration-fast) var(--mx-ease-out);
+}
+
+.mailx-message-toolbar button:hover:not(:disabled):not([aria-invalid="true"]) {
+  background: var(--mx-surface-raised);
+  transform: translateY(-1px);
+}
+
+.mailx-message-toolbar button:disabled,
+.mailx-message-toolbar button[aria-invalid="true"] {
+  opacity: 0.8;
+}
+
+.mailx-message-toolbar.mailx-security-pending::after {
+  content: "MailX is checking another message";
+  width: 100%;
+  color: var(--mx-text-secondary);
+  font: 400 var(--mx-type-xs) var(--mx-font-family);
+}
+
+.mailx-message-toolbar.mailx-security-pending button:disabled {
+  cursor: not-allowed;
+}
+
+.mailx-message-toolbar .mailx-status-safe,
+.mailx-message-toolbar .mailx-status-warning,
+.mailx-message-toolbar .mailx-status-danger,
+.mailx-message-toolbar .mailx-status-none,
+.mailx-message-toolbar .mailx-priority-high,
+.mailx-message-toolbar .mailx-priority-medium,
+.mailx-message-toolbar .mailx-priority-low {
+  color: var(--mx-on-primary);
+  border-color: transparent;
+  animation: mailx-toolbar-slide 340ms cubic-bezier(.22,1,.36,1);
+}
+
+.mailx-message-toolbar .mailx-status-safe,
+.mailx-message-toolbar .mailx-priority-low {
+  background: var(--mx-success);
+}
+
+.mailx-message-toolbar .mailx-status-warning,
+.mailx-message-toolbar .mailx-priority-medium {
+  background: var(--mx-warning);
+}
+
+.mailx-message-toolbar .mailx-status-danger,
+.mailx-message-toolbar .mailx-priority-high {
+  background: var(--mx-danger);
+}
+
+.mailx-message-toolbar .mailx-status-none {
+  background: var(--mx-text-tertiary);
+}
+
+@keyframes mailx-toolbar-slide {
+  from { transform: translateX(-14px); opacity: .3; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mailx-message-toolbar button,
+  .mailx-message-toolbar .mailx-status-safe,
+  .mailx-message-toolbar .mailx-status-warning,
+  .mailx-message-toolbar .mailx-status-danger,
+  .mailx-message-toolbar .mailx-status-none,
+  .mailx-message-toolbar .mailx-priority-high,
+  .mailx-message-toolbar .mailx-priority-medium,
+  .mailx-message-toolbar .mailx-priority-low {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .mailx-message-toolbar,
+  .mailx-message-toolbar button {
+    border-color: CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  .mailx-message-toolbar .mailx-status-safe,
+  .mailx-message-toolbar .mailx-status-warning,
+  .mailx-message-toolbar .mailx-status-danger,
+  .mailx-message-toolbar .mailx-status-none,
+  .mailx-message-toolbar .mailx-priority-high,
+  .mailx-message-toolbar .mailx-priority-medium,
+  .mailx-message-toolbar .mailx-priority-low {
+    color: HighlightText;
+    background: Highlight;
+    border-color: Highlight;
+  }
+}

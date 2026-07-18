@@ -9,3 +9,4 @@ extension/.agents/
 .DS_Store
 *.log
 *.err
+.agents
