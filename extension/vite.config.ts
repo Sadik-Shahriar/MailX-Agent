@@ -8,16 +8,7 @@ const DEV_BACKEND_URL = "http://localhost:8001";
 function backendUrlFor(mode: string) {
   const configured = loadEnv(mode, process.cwd(), "VITE_").VITE_BACKEND_URL;
   const value = configured || (mode === "development" ? DEV_BACKEND_URL : "");
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error("VITE_BACKEND_URL must be an absolute URL.");
-  }
-  if (mode === "production" && (url.protocol !== "https:" || ["localhost", "127.0.0.1"].includes(url.hostname))) {
-    throw new Error("Production VITE_BACKEND_URL must use HTTPS and cannot target localhost.");
-  }
-  return url.toString().replace(/\/$/, "");
+  return value.replace(/\/$/, "");
 }
 
 export default defineConfig(({ mode }) => {

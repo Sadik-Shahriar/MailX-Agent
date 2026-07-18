@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { createStatsRequestGuard } from "./statsRequestGuard";
 import type { Task } from "../shared/types";
 
-type Tab = "inbox" | "tasks" | "stats" | "followups" | "settings";
+type Tab = "inbox" | "tasks" | "stats" | "settings";
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("inbox");
@@ -78,11 +78,22 @@ export default function App() {
     });
   }
 
+  async function findPanel() {
+    chrome.tabs.query({ url: "*://mail.google.com/*" }, (tabs) => {
+      if (!tabs.length) {
+        chrome.tabs.create({ url: "https://mail.google.com" });
+        return;
+      }
+      chrome.runtime.sendMessage({ type: "FIND_PANEL" }, (res) => {
+        if (res?.error) alert(res.error);
+      });
+    });
+  }
+
   useEffect(() => {
     if (!isLoggedIn) return;
     if (activeTab === "stats") loadStats();
-    if (activeTab === "tasks") loadTasks();
-    if (activeTab === "followups") loadReminders();
+    if (activeTab === "tasks") { loadTasks(); loadReminders(); }
     if (activeTab === "settings") chrome.runtime.sendMessage({ type: "GET_PREFERENCES" }, (data) => data && setPreferences(data));
   }, [activeTab, isLoggedIn, period]);
 
@@ -229,10 +240,31 @@ export default function App() {
               <li><strong>Priority</strong> &mdash; Detect priority level</li>
               <li><strong>Tasks</strong> &mdash; Extract tasks & deadlines</li>
             </ul>
+            <button
+              onClick={findPanel}
+              style={{
+                marginTop: 14,
+                padding: "8px 16px",
+                border: "1px solid #facc15",
+                borderRadius: 6,
+                background: "#fef9c3",
+                color: "#854d0e",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                width: "100%",
+                justifyContent: "center",
+              }}
+            >
+              <span style={{ fontSize: 16 }}>🔍</span> Find me
+            </button>
           </div>
         )}
         {activeTab === "tasks" && (
-          <TasksView tasks={tasks} period={period} loading={tasksLoading} error={tasksError} onPeriodChange={setPeriod} onToggle={toggleTask} onDelete={deleteCompletedTask} onDeleteAll={deleteAllCompletedTasks} />
+          <TasksView tasks={tasks} reminders={reminders} period={period} loading={tasksLoading} error={tasksError} onPeriodChange={setPeriod} onToggle={toggleTask} onDelete={deleteCompletedTask} onDeleteAll={deleteAllCompletedTasks} onDismissReminder={dismissReminder} />
         )}
         {activeTab === "stats" && (
           <div>
@@ -241,22 +273,7 @@ export default function App() {
             </div>
             {statsError && <p style={{ color: "#dc2626", fontSize: 12 }}>{statsError}</p>}
             {!stats && !statsError && <p style={{ color: "#9ca3af" }}>Loading statistics...</p>}
-            {stats && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <Score label="Emails sent" value={stats.sent} />
-              <Score label="Emails received" value={stats.received} />
-              <Score label="Tasks completed" value={stats.completedTasks} />
-              <Score label="Tasks pending" value={stats.pendingTasks} />
-            </div>}
-          </div>
-        )}
-        {activeTab === "followups" && (
-          <div>
-            {!reminders.length && <p style={{ color: "#9ca3af" }}>No follow-ups need attention.</p>}
-            {reminders.map((reminder) => <div key={reminder.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "8px 0" }}>
-              <strong style={{ display: "block" }}>{reminder.subject}</strong>
-              <span style={{ color: "#6b7280", fontSize: 11 }}>{reminder.type.replaceAll("_", " ")}</span>
-              <button onClick={() => dismissReminder(reminder.id)} style={{ float: "right", border: 0, background: "transparent", color: "#1a73e8", cursor: "pointer" }}>Dismiss</button>
-            </div>)}
+            {stats && <StatsView stats={stats} />}
           </div>
         )}
         {activeTab === "settings" && (
@@ -298,7 +315,6 @@ function TabBar({ activeTab, onTabChange }: {
     { id: "inbox", label: "Inbox" },
     { id: "tasks", label: "Tasks" },
     { id: "stats", label: "Stats" },
-    { id: "followups", label: "Follow-Ups" },
     { id: "settings", label: "Settings" },
   ];
 
@@ -329,6 +345,7 @@ function TabBar({ activeTab, onTabChange }: {
 
 function TasksView({
   tasks,
+  reminders,
   period,
   loading,
   error,
@@ -336,8 +353,10 @@ function TasksView({
   onToggle,
   onDelete,
   onDeleteAll,
+  onDismissReminder,
 }: {
   tasks: Task[];
+  reminders: any[];
   period: 7 | 30 | 90;
   loading: boolean;
   error: string;
@@ -345,6 +364,7 @@ function TasksView({
   onToggle: (id: string) => void;
   onDelete: (id: string) => void;
   onDeleteAll: () => void;
+  onDismissReminder: (id: string) => void;
 }) {
   const visibleTasks = tasks.filter((task) => task.status === "pending" || task.status === "completed");
   const pending = visibleTasks.filter((task) => task.status === "pending");
@@ -358,7 +378,21 @@ function TasksView({
       <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
         {[7, 30, 90].map((days) => <button key={days} onClick={() => onPeriodChange(days as 7 | 30 | 90)} style={{ flex: 1, border: "1px solid #d1d5db", borderRadius: 4, padding: 5, background: period === days ? "#1f2937" : "white", color: period === days ? "white" : "#374151" }}>{days}d</button>)}
       </div>
-      {!visibleTasks.length && <p style={{ color: "#9ca3af" }}>No tasks in the last {period} days.</p>}
+      {!visibleTasks.length && !reminders.length && <p style={{ color: "#9ca3af" }}>No tasks or follow-ups in the last {period} days.</p>}
+      {reminders.length > 0 && (
+        <section style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <h2 style={{ fontSize: 13, margin: 0, color: "#374151" }}>Follow-ups ({reminders.length})</h2>
+          </div>
+          {reminders.map((reminder) => (
+            <div key={reminder.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "8px 0" }}>
+              <strong style={{ display: "block", fontSize: 13 }}>{reminder.subject}</strong>
+              <span style={{ color: "#6b7280", fontSize: 11 }}>{reminder.type.replaceAll("_", " ")}</span>
+              <button onClick={() => onDismissReminder(reminder.id)} style={{ float: "right", border: 0, background: "transparent", color: "#1a73e8", cursor: "pointer", fontSize: 12 }}>Dismiss</button>
+            </div>
+          ))}
+        </section>
+      )}
       <TaskSection title={`To do (${pending.length})`} tasks={pending} onToggle={onToggle} />
       <TaskSection title={`Completed (${completed.length})`} tasks={completed} onToggle={onToggle} onDelete={onDelete} onDeleteAll={onDeleteAll} />
     </div>
@@ -401,4 +435,45 @@ function TaskSection({
 
 function Score({ label, value }: { label: string; value: number }) {
   return <div style={{ background: "#f3f4f6", borderRadius: 6, padding: 10 }}><strong style={{ display: "block", fontSize: 19 }}>{value}</strong><span style={{ color: "#6b7280", fontSize: 11 }}>{label}</span></div>;
+}
+
+function StatsView({ stats }: { stats: any }) {
+  return (
+    <div>
+      <BarChart title="Emails" items={[
+        { label: "Sent", value: stats.sent, color: "#1a73e8" },
+        { label: "Received", value: stats.received, color: "#059669" },
+      ]} />
+      <BarChart title="Tasks" items={[
+        { label: "Completed", value: stats.completedTasks, color: "#7c3aed" },
+        { label: "Pending", value: stats.pendingTasks, color: "#d97706" },
+      ]} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 4 }}>
+        <Score label="Emails sent" value={stats.sent} />
+        <Score label="Emails received" value={stats.received} />
+        <Score label="Tasks completed" value={stats.completedTasks} />
+        <Score label="Tasks pending" value={stats.pendingTasks} />
+      </div>
+    </div>
+  );
+}
+
+function BarChart({ title, items }: { title: string; items: { label: string; value: number; color: string }[] }) {
+  const max = Math.max(...items.map(i => i.value), 1);
+  return (
+    <div style={{ marginBottom: 14, padding: "0 2px" }}>
+      <h3 style={{ fontSize: 12, margin: "0 0 8px", color: "#374151", fontWeight: 600 }}>{title}</h3>
+      {items.map(item => (
+        <div key={item.label} style={{ marginBottom: 7 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b7280", marginBottom: 3 }}>
+            <span>{item.label}</span>
+            <span style={{ fontWeight: 600, color: "#374151" }}>{item.value}</span>
+          </div>
+          <div style={{ height: 10, background: "#f3f4f6", borderRadius: 5, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${Math.min((item.value / max) * 100, 100)}%`, background: item.color, borderRadius: 5, transition: "width 0.4s ease" }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }

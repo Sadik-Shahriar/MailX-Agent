@@ -149,6 +149,21 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
 
     chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
       if (msg.type === "RENDER_RESULT") renderResult(msg.data);
+      if (msg.type === "FIND_PANEL" && actionPanel) {
+        const panel = actionPanel;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const pw = panel.offsetWidth;
+        const ph = panel.offsetHeight;
+        panel.style.left = `${(vw - pw) / 2}px`;
+        panel.style.top = `${(vh - ph) / 2}px`;
+        panel.style.right = "auto";
+        panel.style.bottom = "auto";
+        panel.style.transition = "left 400ms ease, top 400ms ease, box-shadow 600ms ease";
+        const orig = panel.style.boxShadow;
+        panel.style.boxShadow = "0 0 0 3px #facc15, 0 0 20px 5px rgba(250,204,21,0.5), 0 4px 10px rgba(30,64,115,0.14)";
+        setTimeout(() => { panel.style.boxShadow = orig; }, 2500);
+      }
       sendResponse({ received: true });
       return true;
     });
@@ -370,6 +385,105 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
        #mailx-result { min-width: 0; opacity: 1; transform: translateX(0); animation: mailx-result-in 240ms cubic-bezier(.22, 1, .36, 1); }
        @keyframes mailx-result-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
 
+      .mailx-tab-bar {
+        display: flex;
+        border-bottom: 1px solid #e6edf8;
+        margin-bottom: 10px;
+      }
+      .mailx-tab {
+        flex: 1;
+        border: 0;
+        background: transparent;
+        padding: 8px 4px;
+        font: 600 11px Arial, sans-serif;
+        color: #6b7280;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: color 150ms, border-color 150ms;
+      }
+      .mailx-tab:hover { color: #374151; }
+      .mailx-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
+      .mailx-tab-content { display: none; }
+      .mailx-tab-content.active { display: block; }
+      .mailx-tab-section { margin-bottom: 16px; }
+      .mailx-tab-section h2 {
+        font-size: 12px; margin: 0 0 8px; color: #374151; font-weight: 600;
+      }
+      .mailx-task-item {
+        display: block; padding: 8px 0; border-bottom: 1px solid #e5e7eb;
+        font-size: 12px; color: #172033; cursor: pointer;
+      }
+      .mailx-task-item.completed span { text-decoration: line-through; color: #9ca3af; }
+      .mailx-task-detail {
+        display: block; margin: 3px 0 0 20px; color: #6b7280; font-size: 10px;
+      }
+      .mailx-reminder-item {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 8px 0; border-bottom: 1px solid #e5e7eb; font-size: 12px;
+      }
+      .mailx-reminder-item strong { display: block; font-size: 12px; color: #172033; }
+      .mailx-reminder-item span { color: #6b7280; font-size: 10px; }
+      .mailx-reminder-item button {
+        border: 0; background: transparent; color: #1a73e8; cursor: pointer; font-size: 11px;
+      }
+      .mailx-stat-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;
+      }
+      .mailx-stat-card {
+        padding: 8px; border-radius: 6px; background: #f9fafb; border: 1px solid #e5e7eb;
+      }
+      .mailx-stat-card strong {
+        display: block; font-size: 18px; color: #172033; font-weight: 700;
+      }
+      .mailx-stat-card span {
+        font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em;
+      }
+      .mailx-bar-chart { margin-bottom: 12px; padding: 0 2px; }
+      .mailx-bar-chart h3 { font-size: 11px; margin: 0 0 6px; color: #374151; font-weight: 600; }
+      .mailx-bar-row { margin-bottom: 6px; }
+      .mailx-bar-label {
+        display: flex; justify-content: space-between; font-size: 10px; color: #6b7280; margin-bottom: 2px;
+      }
+      .mailx-bar-track {
+        height: 8px; background: #f3f4f6; border-radius: 4px; overflow: hidden;
+      }
+      .mailx-bar-fill {
+        height: 100%; border-radius: 4px; transition: width 0.4s ease;
+      }
+      .mailx-tab-empty {
+        color: #9ca3af; font-size: 12px; text-align: center; padding: 20px 0;
+      }
+      .mailx-period-bar {
+        display: flex; gap: 4px; margin-bottom: 12px;
+      }
+      .mailx-period-bar button {
+        flex: 1; border: 1px solid #d1d5db; border-radius: 4px; padding: 4px;
+        background: white; color: #374151; cursor: pointer; font: 600 11px Arial, sans-serif;
+      }
+      .mailx-period-bar button.active {
+        background: #1f2937; color: white; border-color: #1f2937;
+      }
+      .mailx-auth-overlay {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 32px 20px; text-align: center; min-height: 200px;
+      }
+      .mailx-auth-overlay img { width: 48px; height: 48px; margin-bottom: 12px; }
+      .mailx-auth-overlay h2 { margin: 0 0 6px; font-size: 16px; color: #172033; }
+      .mailx-auth-overlay p { margin: 0 0 20px; font-size: 12px; color: #6b7280; line-height: 1.5; }
+      .mailx-auth-btn {
+        border: 0; border-radius: 8px; padding: 10px 24px;
+        background: #1f2937; color: white; cursor: pointer;
+        font: 600 13px Arial, sans-serif; width: 100%; max-width: 220px;
+        transition: background 150ms;
+      }
+      .mailx-auth-btn:hover { background: #374151; }
+      .mailx-signout-btn {
+        border: 1px solid #d1d5db; border-radius: 4px; padding: 4px 12px;
+        background: white; color: #6b7280; cursor: pointer;
+        font: 600 11px Arial, sans-serif;
+      }
+      .mailx-signout-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+
       @media (max-width: 700px) {
         #mailx-action-panel {
           right: 12px;
@@ -387,7 +501,10 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
 
   function syncActionPanel(): void {
     if (!overlayShadow) return;
-    if (!actionPanel) actionPanel = createActionPanel();
+    if (!actionPanel) {
+      actionPanel = createActionPanel();
+      syncPanelAuth(actionPanel);
+    }
     const hasOpenEmail = Boolean(document.querySelector(".a3s"));
     actionPanel.style.display = "block";
     const emailActions = actionPanel.querySelector<HTMLElement>(".mailx-email-actions");
@@ -397,6 +514,52 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
     if (hasOpenEmail) {
       syncMessageToolbar();
     }
+  }
+
+  function syncPanelAuth(panel: HTMLElement): void {
+    chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
+      const loggedIn = res?.loggedIn === true;
+      const tabBar = panel.querySelector<HTMLElement>(".mailx-tab-bar");
+      const tabContents = panel.querySelectorAll<HTMLElement>("[data-tab-content]");
+      const authOverlay = panel.querySelector<HTMLElement>(".mailx-auth-overlay");
+      const signOutBtn = panel.querySelector<HTMLElement>(".mailx-signout-btn") as HTMLButtonElement | null;
+
+      if (loggedIn) {
+        if (tabBar) tabBar.style.display = "";
+        tabContents.forEach((el) => el.style.display = "");
+        if (authOverlay) authOverlay.style.display = "none";
+        if (signOutBtn) signOutBtn.style.display = "";
+        const subtitle = panel.querySelector<HTMLElement>(".mailx-panel-subtitle");
+        if (subtitle) subtitle.style.display = "";
+      } else {
+        if (tabBar) tabBar.style.display = "none";
+        tabContents.forEach((el) => el.style.display = "none");
+        if (authOverlay) {
+          authOverlay.style.display = "";
+          renderAuthOverlay(authOverlay);
+        }
+        if (signOutBtn) signOutBtn.style.display = "none";
+        const subtitle = panel.querySelector<HTMLElement>(".mailx-panel-subtitle");
+        if (subtitle) subtitle.style.display = "none";
+      }
+    });
+  }
+
+  function renderAuthOverlay(container: HTMLElement): void {
+    container.innerHTML = `
+      <img src="${chrome.runtime.getURL("public/icons/mailx-logo.png")}" alt="MailX" style="width:48px;height:48px;margin-bottom:12px">
+      <h2>Welcome to MailX</h2>
+      <p>AI-powered email assistant for Gmail.<br>Sign in to get started.</p>
+      <button class="mailx-auth-btn" id="mailx-signin-btn">Sign in with Google</button>
+    `;
+    container.querySelector("#mailx-signin-btn")?.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "SIGN_IN" }, (res) => {
+        if (res?.loggedIn) {
+          const panel = actionPanel;
+          if (panel) syncPanelAuth(panel);
+        }
+      });
+    });
   }
 
   function addMessageToolbarStyles(): void {
@@ -552,6 +715,21 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
 
     const content = document.createElement("div");
     content.className = "mailx-panel-content";
+
+    const tabBar = document.createElement("div");
+    tabBar.className = "mailx-tab-bar";
+    const tabs = ["actions", "tasks", "stats"];
+    const tabLabels: Record<string, string> = { actions: "Actions", tasks: "Tasks", stats: "Stats" };
+    for (const name of tabs) {
+      const btn = document.createElement("button");
+      btn.className = "mailx-tab" + (name === "actions" ? " active" : "");
+      btn.textContent = tabLabels[name];
+      btn.dataset.tab = name;
+      btn.addEventListener("click", () => showPanelTab(name));
+      tabBar.appendChild(btn);
+    }
+    content.appendChild(tabBar);
+
     const generalActions = document.createElement("div");
     generalActions.className = "mailx-general-actions";
     const composeLabel = document.createElement("div");
@@ -578,14 +756,48 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
     const secondaryActions = document.createElement("div");
     secondaryActions.className = "mailx-secondary-actions";
     secondaryActions.append(
-      createActionButton("tasks", "Tasks", "", false)
+      createActionButton("tasks", "Extract", "Extract tasks from this email", false)
     );
 
     emailActions.append(emailLabel, primaryActions, secondaryActions);
     const actions = document.createElement("div");
-    actions.className = "mailx-actions";
+    actions.className = "mailx-actions mailx-tab-content active";
+    actions.dataset.tabContent = "actions";
     actions.append(generalActions, emailActions);
-     content.appendChild(actions);
+    content.appendChild(actions);
+
+    const tasksContent = document.createElement("div");
+    tasksContent.className = "mailx-tab-content";
+    tasksContent.id = "mailx-tasks-content";
+    tasksContent.dataset.tabContent = "tasks";
+    content.appendChild(tasksContent);
+
+    const statsContent = document.createElement("div");
+    statsContent.className = "mailx-tab-content";
+    statsContent.id = "mailx-stats-content";
+    statsContent.dataset.tabContent = "stats";
+    content.appendChild(statsContent);
+
+    const authOverlay = document.createElement("div");
+    authOverlay.className = "mailx-auth-overlay";
+    authOverlay.style.display = "none";
+    content.appendChild(authOverlay);
+
+    const signOutBtn = document.createElement("button");
+    signOutBtn.className = "mailx-signout-btn";
+    signOutBtn.type = "button";
+    signOutBtn.textContent = "Sign out";
+    signOutBtn.style.display = "none";
+    signOutBtn.addEventListener("click", (event) => {
+      chrome.runtime.sendMessage({ type: "SIGN_OUT" });
+      syncPanelAuth(panel);
+    });
+
+    const signOutWrap = document.createElement("div");
+    signOutWrap.style.cssText = "text-align:center;padding:8px 0";
+    signOutWrap.appendChild(signOutBtn);
+    content.appendChild(signOutWrap);
+
     panel.appendChild(content);
     overlayShadow?.appendChild(panel);
     void restorePanelState(panel, minimize);
@@ -717,6 +929,163 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
 
     button.addEventListener("click", () => handleAction(action, button));
     return button;
+  }
+
+  function showPanelTab(name: string): void {
+    const content = overlayShadow?.querySelector<HTMLElement>(".mailx-panel-content");
+    if (!content) return;
+    content.querySelectorAll(".mailx-tab").forEach((btn) => btn.classList.toggle("active", (btn as HTMLElement).dataset.tab === name));
+    content.querySelectorAll<HTMLElement>("[data-tab-content]").forEach((el) => el.classList.toggle("active", el.dataset.tabContent === name));
+    if (name === "tasks") loadTasksForPanel();
+    if (name === "stats") loadStatsForPanel();
+    if (actionPanel) resetPanelIdleTimer(actionPanel, actionPanel.querySelector(".mailx-minimize") as HTMLButtonElement);
+  }
+
+  function loadTasksForPanel(): void {
+    const container = overlayShadow?.getElementById("mailx-tasks-content");
+    if (!container) return;
+    container.innerHTML = `<div class="mailx-tab-empty">Loading tasks...</div>`;
+    let period: 7 | 30 | 90 = 7;
+    const fetchTasks = () => {
+      container.innerHTML = `<div class="mailx-tab-empty">Loading tasks...</div>`;
+      chrome.runtime.sendMessage({ type: "GET_TASKS", period } as ExtensionMessage, (tasksResp) => {
+        if (!container) return;
+        if (chrome.runtime.lastError || tasksResp?.error) {
+          container.innerHTML = `<div class="mailx-tab-empty" style="color:#dc2626">Error loading tasks</div>`;
+          return;
+        }
+        chrome.runtime.sendMessage({ type: "GET_REMINDERS" } as ExtensionMessage, (remindResp) => {
+          if (!container) return;
+          renderTasksInPanel(container, tasksResp?.tasks || [], remindResp?.reminders || [], period);
+        });
+      });
+    };
+    container.dataset.activePeriod = "7";
+    fetchTasks();
+    if (!container.dataset.listenerAttached) {
+      container.dataset.listenerAttached = "1";
+      container.addEventListener("click", (e) => {
+        const btn = (e.target as HTMLElement).closest("[data-period-btn]");
+        if (btn) {
+          period = parseInt((btn as HTMLElement).dataset.periodBtn!) as 7 | 30 | 90;
+          container.dataset.activePeriod = String(period);
+          fetchTasks();
+          return;
+        }
+        const dismissBtn = (e.target as HTMLElement).closest("[data-dismiss-reminder]");
+        if (dismissBtn) {
+          chrome.runtime.sendMessage({ type: "DISMISS_REMINDER", reminder_id: (dismissBtn as HTMLElement).dataset.dismissReminder! } as ExtensionMessage, () => { if (container) fetchTasks(); });
+          return;
+        }
+        const toggleCheck = (e.target as HTMLElement).closest("[data-toggle-task]");
+        if (toggleCheck) {
+          chrome.runtime.sendMessage({ type: "TOGGLE_TASK", task_id: (toggleCheck as HTMLElement).dataset.toggleTask! } as ExtensionMessage, () => { if (container) fetchTasks(); });
+          return;
+        }
+        const deleteBtn = (e.target as HTMLElement).closest("[data-delete-task]");
+        if (deleteBtn) {
+          chrome.runtime.sendMessage({ type: "DELETE_TASK", task_id: (deleteBtn as HTMLElement).dataset.deleteTask! } as ExtensionMessage, () => { if (container) fetchTasks(); });
+        }
+      });
+    }
+  }
+
+  function renderTasksInPanel(container: HTMLElement, tasks: any[], reminders: any[], period: 7 | 30 | 90): void {
+    const pending = tasks.filter((t: any) => t.status === "pending");
+    const completed = tasks.filter((t: any) => t.status === "completed");
+    const visible = [...pending, ...completed];
+    const html: string[] = [];
+
+    html.push(`<div class="mailx-period-bar">`);
+    for (const d of [7, 30, 90]) {
+      html.push(`<button data-period-btn="${d}" class="${d === period ? "active" : ""}">${d}d</button>`);
+    }
+    html.push(`</div>`);
+
+    if (!visible.length && !reminders.length) {
+      html.push(`<div class="mailx-tab-empty">No tasks or follow-ups in the last ${period} days.</div>`);
+      container.innerHTML = html.join("");
+      return;
+    }
+
+    if (reminders.length) {
+      html.push(`<div class="mailx-tab-section"><h2>Follow-ups (${reminders.length})</h2>`);
+      for (const r of reminders) {
+        html.push(`<div class="mailx-reminder-item">
+          <div><strong>${escHtml(r.subject || "")}</strong><span>${escHtml((r.type || "").replaceAll("_", " "))}</span></div>
+          <button data-dismiss-reminder="${r.id}">Dismiss</button>
+        </div>`);
+      }
+      html.push(`</div>`);
+    }
+
+    if (pending.length) {
+      html.push(`<div class="mailx-tab-section"><h2>To do (${pending.length})</h2>`);
+      for (const t of pending) {
+        html.push(`<label class="mailx-task-item">
+          <input type="checkbox" data-toggle-task="${t.id}">
+          <span>${escHtml(t.description || "")}</span>
+          <small class="mailx-task-detail">${t.due_date ? "Due " + t.due_date : "No due date"} · ${escHtml(t.priority || "medium")} priority</small>
+        </label>`);
+      }
+      html.push(`</div>`);
+    }
+
+    if (completed.length) {
+      html.push(`<div class="mailx-tab-section"><h2>Completed (${completed.length})</h2>`);
+      for (const t of completed) {
+        html.push(`<label class="mailx-task-item completed">
+          <input type="checkbox" checked data-toggle-task="${t.id}">
+          <span>${escHtml(t.description || "")}</span>
+          <small class="mailx-task-detail">${t.due_date ? "Due " + t.due_date : "No due date"} · ${escHtml(t.priority || "medium")} priority</small>
+          <button data-delete-task="${t.id}" style="margin:4px 0 0 20px;border:1px solid #fecaca;border-radius:4px;padding:2px 6px;background:#fff7f7;color:#b91c1c;cursor:pointer;font-size:10px">Delete</button>
+        </label>`);
+      }
+      html.push(`</div>`);
+    }
+
+    container.innerHTML = html.join("");
+  }
+
+  function loadStatsForPanel(): void {
+    const container = overlayShadow?.getElementById("mailx-stats-content");
+    if (!container) return;
+    container.innerHTML = `<div class="mailx-tab-empty">Loading stats...</div>`;
+    chrome.runtime.sendMessage({ type: "GET_STATS", period: 7 } as ExtensionMessage, (resp) => {
+      if (!container) return;
+      if (chrome.runtime.lastError || resp?.error) {
+        container.innerHTML = `<div class="mailx-tab-empty" style="color:#dc2626">Error loading stats</div>`;
+        return;
+      }
+      renderStatsInPanel(container, resp || {});
+    });
+  }
+
+  function renderStatsInPanel(container: HTMLElement, stats: any): void {
+    const s = stats;
+    const max = Math.max(s.sent || 0, s.received || 0, 1);
+    const tmax = Math.max(s.completedTasks || 0, s.pendingTasks || 0, 1);
+    container.innerHTML = `
+      <div class="mailx-bar-chart"><h3>Emails</h3>
+        <div class="mailx-bar-row"><div class="mailx-bar-label"><span>Sent</span><span style="font-weight:600;color:#374151">${s.sent ?? 0}</span></div><div class="mailx-bar-track"><div class="mailx-bar-fill" style="width:${Math.min((s.sent / max) * 100, 100)}%;background:#1a73e8"></div></div></div>
+        <div class="mailx-bar-row"><div class="mailx-bar-label"><span>Received</span><span style="font-weight:600;color:#374151">${s.received ?? 0}</span></div><div class="mailx-bar-track"><div class="mailx-bar-fill" style="width:${Math.min((s.received / max) * 100, 100)}%;background:#059669"></div></div></div>
+      </div>
+      <div class="mailx-bar-chart"><h3>Tasks</h3>
+        <div class="mailx-bar-row"><div class="mailx-bar-label"><span>Completed</span><span style="font-weight:600;color:#374151">${s.completedTasks ?? 0}</span></div><div class="mailx-bar-track"><div class="mailx-bar-fill" style="width:${Math.min((s.completedTasks / tmax) * 100, 100)}%;background:#7c3aed"></div></div></div>
+        <div class="mailx-bar-row"><div class="mailx-bar-label"><span>Pending</span><span style="font-weight:600;color:#374151">${s.pendingTasks ?? 0}</span></div><div class="mailx-bar-track"><div class="mailx-bar-fill" style="width:${Math.min((s.pendingTasks / tmax) * 100, 100)}%;background:#d97706"></div></div></div>
+      </div>
+      <div class="mailx-stat-grid">
+        <div class="mailx-stat-card"><strong>${s.sent ?? 0}</strong><span>Emails sent</span></div>
+        <div class="mailx-stat-card"><strong>${s.received ?? 0}</strong><span>Emails received</span></div>
+        <div class="mailx-stat-card"><strong>${s.completedTasks ?? 0}</strong><span>Tasks completed</span></div>
+        <div class="mailx-stat-card"><strong>${s.pendingTasks ?? 0}</strong><span>Tasks pending</span></div>
+      </div>`;
+  }
+
+  function escHtml(str: string): string {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
   }
 
   function handleAction(action: string, button: HTMLButtonElement, contextOverride?: EmailContext | null, bodyElement?: HTMLElement): void {
@@ -1059,7 +1428,8 @@ import { DebouncedMessageBodies } from "./toolbarObserver";
       state.pendingPrompt = prompt;
       renderChatComposer(context);
       const isDraft = isDraftInstruction(prompt);
-      const request = sendAiMessage({ type: isDraft ? "GENERATE_DRAFT" : "CHAT", email_context: context, prompt, history: state.history }, "explicit", "chat_composer", (response) => {
+      const sanitizedHistory = state.history.map(({ isReply: _ir, draft: _d, ...msg }) => msg);
+      const request = sendAiMessage({ type: isDraft ? "GENERATE_DRAFT" : "CHAT", email_context: context, prompt, history: sanitizedHistory }, "explicit", "chat_composer", (response) => {
         if (state.request?.requestId !== request.requestId) return;
         state.request = undefined;
         state.pending = false;

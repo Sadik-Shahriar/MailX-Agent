@@ -139,7 +139,8 @@ export type MessageType =
   | "DEV_SIGN_IN"
   | "CHECK_SPAM"
   | "CHECK_PHISHING_URL"
-  | "CANCEL_REQUEST";
+  | "CANCEL_REQUEST"
+  | "FIND_PANEL";
 
 export interface ExtensionMessage {
   type: MessageType;

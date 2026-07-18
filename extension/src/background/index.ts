@@ -217,6 +217,13 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
     case "CANCEL_REQUEST":
       return { cancelled: !!msg.request_id && requestRegistry.cancel(msg.request_id) };
 
+    case "FIND_PANEL": {
+      const tabs = await chrome.tabs.query({ url: "*://mail.google.com/*" });
+      if (!tabs.length || !tabs[0].id) throw new Error("Open Gmail to find the MailX panel.");
+      await chrome.tabs.sendMessage(tabs[0].id, { type: "FIND_PANEL" });
+      return { found: true };
+    }
+
     case "GET_REMINDERS": return { reminders: await getReminders() };
     case "DISMISS_REMINDER":
       if (!msg.reminder_id) throw new Error("Missing reminder ID.");
