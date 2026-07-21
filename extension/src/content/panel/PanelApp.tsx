@@ -189,8 +189,9 @@ export function PanelApp({ controller, host }: PanelAppProps) {
     }
   }
 
+  const dragThreshold = 5;
   const handlePointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest("button") || collapsed) return;
+    if (!collapsed && (e.target as HTMLElement).closest("button")) return;
     const panel = panelRef.current;
     if (!panel) return;
     
@@ -227,8 +228,16 @@ export function PanelApp({ controller, host }: PanelAppProps) {
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (!dragRef.current.isDragging) return;
+    const dx = Math.abs(e.clientX - dragRef.current.startX);
+    const dy = Math.abs(e.clientY - dragRef.current.startY);
+    const wasClick = dx < dragThreshold && dy < dragThreshold;
     dragRef.current.isDragging = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
+
+    if (wasClick && collapsed) {
+      toggleCollapse();
+      return;
+    }
     
     if (panelRef.current) {
       chrome.storage.local.set({ 
@@ -254,9 +263,19 @@ export function PanelApp({ controller, host }: PanelAppProps) {
         className={collapsed ? "mailx-collapsed" : ""}
       >
         {collapsed ? (
-          <button className="mailx-panel-launcher" type="button" aria-label="Open MailX" aria-expanded="false" onClick={toggleCollapse}>
+          <div
+            className="mailx-panel-launcher"
+            role="button"
+            tabIndex={0}
+            aria-label="Open MailX"
+            aria-expanded="false"
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          >
             <img src={chrome.runtime.getURL("public/icons/mailx-logo.png")} alt="" />
-          </button>
+          </div>
         ) : (
           <>
             <div 

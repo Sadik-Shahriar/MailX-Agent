@@ -1,13 +1,31 @@
 import type { StructuredDraft } from "../panel/PanelHost";
 
-const EDITOR_SELECTOR = '[contenteditable="true"][role="textbox"]';
+const EDITOR_SELECTORS = [
+  '[contenteditable="true"][role="textbox"]',
+  '[contenteditable="true"][aria-label*="Message Body"]',
+  '.Am.Al.editable',
+  'div[role="textbox"][contenteditable="true"]',
+];
 const REPLY_SELECTORS = ['[data-tooltip="Reply"]', '[aria-label="Reply"]'];
-const COMPOSE_SELECTORS = ['[gh="cm"]', '[data-tooltip="Compose"]', '[aria-label="Compose"]'];
-const TO_SELECTORS = ['input[name="to"]', 'input[aria-label^="To"]', 'input[aria-label^="Recipients"]'];
-const SUBJECT_SELECTORS = ['input[name="subjectbox"]', 'input[placeholder="Subject"]', 'input[aria-label="Subject"]'];
+const COMPOSE_TRIGGER_SELECTORS = ['[gh="cm"]', '[data-tooltip="Compose"]', '[aria-label="Compose"]'];
+const TO_SELECTORS = [
+  'input[name="to"]',
+  'input[aria-label^="To"]',
+  'input[aria-label^="Recipients"]',
+  'input[aria-label*="recipients"]',
+  'div[aria-label*="To"][contenteditable="true"]',
+  'div[aria-label*="recipients"][contenteditable="true"]',
+];
+const SUBJECT_SELECTORS = [
+  'input[name="subjectbox"]',
+  'input[placeholder="Subject"]',
+  'input[aria-label="Subject"]',
+  'input[aria-label*="Subject"]',
+  'input[aria-label*="subject"]',
+];
 
 function isVisible(element: HTMLElement): boolean {
-  return element.offsetParent !== null;
+  return element.offsetParent !== null || element.getClientRects().length > 0;
 }
 
 function findVisible(selectors: string[]): HTMLElement | undefined {
@@ -17,8 +35,15 @@ function findVisible(selectors: string[]): HTMLElement | undefined {
   }
 }
 
+export type ComposeBoxResult =
+  | { ok: true; composer: HTMLElement }
+  | { ok: false; reason: "no_composer" };
+
 export function getComposeBox(): HTMLElement | undefined {
-  return Array.from(document.querySelectorAll<HTMLElement>(EDITOR_SELECTOR)).filter(isVisible).pop();
+  for (const selector of EDITOR_SELECTORS) {
+    const boxes = Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(isVisible);
+    if (boxes.length) return boxes[boxes.length - 1];
+  }
 }
 
 export function getComposeText(): string {
@@ -41,10 +66,25 @@ function waitForComposeBox(timeoutMs = 4_000): Promise<HTMLElement | undefined> 
   });
 }
 
-async function openEditor(selectors: string[], timeoutMs: number): Promise<HTMLElement | undefined> {
+function waitForStableDialog(timeoutMs = 2_000): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      // After compose opens, Gmail may batch-render dialog fields.
+      const composer = getComposeBox();
+      const to = TO_SELECTORS.some((s) => document.querySelector(s));
+      if (composer && to) { resolve(); return; }
+      if (Date.now() - startedAt >= timeoutMs) { resolve(); return; }
+      window.setTimeout(check, 80);
+    };
+    const startedAt = Date.now();
+    check();
+  });
+}
+
+async function openEditor(timeoutMs: number): Promise<HTMLElement | undefined> {
   const existing = getComposeBox();
   if (existing) return existing;
-  const trigger = findVisible(selectors);
+  const trigger = findVisible(COMPOSE_TRIGGER_SELECTORS);
   if (!trigger) return undefined;
   trigger.click();
   return waitForComposeBox(timeoutMs);
@@ -52,8 +92,7 @@ async function openEditor(selectors: string[], timeoutMs: number): Promise<HTMLE
 
 function replaceComposerText(composer: HTMLElement): void {
   composer.focus();
-  document.execCommand("selectAll", false);
-  document.execCommand("delete", false);
+  composer.textContent = "";
   composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
 }
 
@@ -80,28 +119,50 @@ function draftBody(draft: StructuredDraft): string {
 }
 
 export async function insertReplyIntoGmail(text: string, replace: boolean, timeoutMs = 4_000): Promise<boolean> {
-  const composer = await openEditor(REPLY_SELECTORS, timeoutMs);
+  const existing = getComposeBox();
+  if (existing) {
+    if (replace) replaceComposerText(existing);
+    insertComposerText(text, existing);
+    return true;
+  }
+  const trigger = findVisible(REPLY_SELECTORS);
+  if (!trigger) return false;
+  trigger.click();
+  const composer = await waitForComposeBox(timeoutMs);
   if (!composer) return false;
   if (replace) replaceComposerText(composer);
   insertComposerText(text, composer);
   return true;
 }
 
-export async function insertDraftIntoGmail(draft: StructuredDraft, replace: boolean, timeoutMs = 4_000): Promise<boolean> {
-  const composer = await openEditor(COMPOSE_SELECTORS, timeoutMs);
-  if (!composer) return false;
+function trySetField(selectors: string[], value: string): boolean {
+  const field = findVisible(selectors);
+  if (!(field instanceof HTMLInputElement)) return false;
+  // contenteditable divs used in some Gmail layouts
+  if (field.isContentEditable) {
+    field.focus();
+    field.textContent = value;
+    field.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+    return true;
+  }
+  setFieldValue(field, value);
+  return true;
+}
+
+export async function insertDraftIntoGmail(draft: StructuredDraft, replace: boolean, timeoutMs = 4_000): Promise<ComposeBoxResult> {
+  const composer = await openEditor(timeoutMs);
+  if (!composer) return { ok: false, reason: "no_composer" };
+
+  // Give compose dialog fields a moment to render after opening.
+  await waitForStableDialog(2_000);
 
   if (isValidRecipient(draft.to)) {
-    const recipient = findVisible(TO_SELECTORS);
-    if (!(recipient instanceof HTMLInputElement)) return false;
-    setFieldValue(recipient, draft.to.trim());
+    trySetField(TO_SELECTORS, draft.to.trim());
   }
   if (draft.subject) {
-    const subject = findVisible(SUBJECT_SELECTORS);
-    if (!(subject instanceof HTMLInputElement)) return false;
-    setFieldValue(subject, draft.subject);
+    trySetField(SUBJECT_SELECTORS, draft.subject);
   }
   if (replace) replaceComposerText(composer);
   insertComposerText(draftBody(draft), composer);
-  return true;
+  return { ok: true, composer };
 }

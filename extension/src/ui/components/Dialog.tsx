@@ -21,7 +21,7 @@ export const Dialog = ({ isOpen, title, description, onClose, children, footer }
       const dialog = dialogRef.current;
       if (!dialog) return;
 
-      // Closed shadow roots expose their focused descendant through the root, not document.
+      // Use the correct active element regardless of shadow DOM context
       const getActiveElement = (): Element | null => {
         const root = dialog.getRootNode();
         return root instanceof ShadowRoot ? root.activeElement : document.activeElement;

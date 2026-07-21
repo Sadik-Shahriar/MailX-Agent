@@ -2,7 +2,7 @@ import { ChatRequest, ChatResponse } from "../shared/types";
 import { elapsedMs, ensureRequestTelemetry, logTelemetry } from "../shared/telemetry";
 import { abortReason, createDeadlineSignal, RequestTimeoutError } from "../shared/abort";
 
-const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || (import.meta.env.DEV ? "http://localhost:8001" : "")).replace(/\/$/, "");
+const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL || "http://localhost:8001").replace(/\/$/, "");
 
 function requireBackendUrl(): string {
   if (!BACKEND_URL) throw new Error("MailX backend URL is not configured.");

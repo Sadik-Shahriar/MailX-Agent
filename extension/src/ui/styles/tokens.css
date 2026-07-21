@@ -1,4 +1,4 @@
-:root, :host {
+:root, #mailx-root {
   color-scheme: light;
 
   /* Typography */
@@ -48,7 +48,7 @@
 }
 
 /* Light Theme (default) */
-:root, :host, [data-theme="light"] {
+:root, #mailx-root, [data-theme="light"] {
   --mx-bg: #F8FAFC;
   --mx-surface: #FFFFFF;
   --mx-surface-subtle: #F1F5F9;
@@ -75,7 +75,7 @@
 
 /* Dark Theme */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]), :host:not([data-theme="light"]) {
+  :root:not([data-theme="light"]), #mailx-root:not([data-theme="light"]) {
     --mx-bg: #0B1220;
     --mx-surface: #111827;
     --mx-surface-subtle: #1E293B;
@@ -101,7 +101,7 @@
   }
 }
 
-[data-theme="dark"], :host([data-theme="dark"]) {
+[data-theme="dark"], #mailx-root[data-theme="dark"] {
   color-scheme: dark;
   --mx-bg: #0B1220;
   --mx-surface: #111827;
@@ -128,7 +128,7 @@
 }
 
 @media (forced-colors: active) {
-  :root, :host, [data-theme="light"], [data-theme="dark"] {
+  :root, #mailx-root, [data-theme="light"], [data-theme="dark"] {
     --mx-bg: Canvas;
     --mx-surface: Canvas;
     --mx-surface-subtle: Canvas;

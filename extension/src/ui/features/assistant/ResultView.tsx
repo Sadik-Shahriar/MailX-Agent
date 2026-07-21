@@ -46,6 +46,16 @@ export function ResultView({ host, action, result, pending, onBack, onCancel }: 
 
   const responseState = getAiResponseState(result);
 
+  function getCopyText(): string {
+    if (responseState.state !== "success") return "";
+    if (responseState.response.result?.kind === "tasks") {
+      return responseState.response.result.tasks.map((task) =>
+        `${task.description}\n${task.assignee}${task.due_date ? `, due ${task.due_date}` : ""} (${task.priority})`
+      ).join("\n\n");
+    }
+    return responseText(responseState.response);
+  }
+
   const performInsert = async (replace: boolean) => {
     setShowConfirm(false);
     if (responseState.state !== "success") return;
@@ -114,7 +124,7 @@ export function ResultView({ host, action, result, pending, onBack, onCancel }: 
           {action === "reply" && (
             <Button variant="primary" onClick={handleInsert} style={{ flex: 1 }}>Insert in Gmail</Button>
           )}
-          <Button variant="secondary" onClick={() => handleCopy(responseText(responseState.response))} style={{ flex: action === "summarize" ? 1 : undefined }}>Copy</Button>
+          <Button variant="secondary" onClick={() => handleCopy(getCopyText())} style={{ flex: action === "summarize" ? 1 : undefined }}>Copy</Button>
         </div>
       )}
 

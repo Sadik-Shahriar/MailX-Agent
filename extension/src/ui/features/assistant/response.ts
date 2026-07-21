@@ -41,7 +41,7 @@ function isChatResponse(value: unknown): value is ChatResponse {
   if (!value.actions.every((action) => isRecord(action) && typeof action.label === "string" && typeof action.action === "string")) {
     return false;
   }
-  return value.result === undefined || isStructuredResult(value.result);
+  return value.result == null || isStructuredResult(value.result);
 }
 
 function isErrorResponse(value: unknown): value is AiErrorResponse {

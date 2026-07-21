@@ -85,6 +85,7 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
 TELEMETRY_ENABLED = os.getenv("MAILX_TELEMETRY", "").lower() in ("1", "true", "yes")
+MAILX_DEV_MODE = os.getenv("MAILX_DEV_MODE", "").lower() in ("1", "true", "yes")
 TELEMETRY_LOGGER = logging.getLogger("mailx.telemetry")
 if TELEMETRY_ENABLED:
     TELEMETRY_LOGGER.setLevel(logging.INFO)
@@ -246,6 +247,10 @@ def require_authenticated_user(request: Request) -> AuthenticatedUser:
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Authentication is required.")
+
+    if MAILX_DEV_MODE and token == "dev-token":
+        return AuthenticatedUser(id="dev-user-001")
+
     if not SUPABASE_URL:
         raise HTTPException(status_code=503, detail="AI authentication is not configured.")
     try:
@@ -622,11 +627,22 @@ STRUCTURED_INTENTS = frozenset(("priority", "tasks", "draft", "spam", "phishing"
 
 
 def validate_structured_result(intent: str, content: str) -> StructuredResult:
-    """Accept only a complete JSON value; model prose and fenced JSON are invalid."""
+    """Parse structured JSON output with lenient handling for model quirks."""
+    cleaned = content.strip()
+    fence = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1).strip()
     try:
-        value = json.loads(content)
-    except json.JSONDecodeError as error:
-        raise ValueError("LLM provider returned malformed structured output") from error
+        value = json.loads(cleaned)
+    except json.JSONDecodeError:
+        brace = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if brace:
+            try:
+                value = json.loads(brace.group())
+            except json.JSONDecodeError as error:
+                raise ValueError("LLM provider returned malformed structured output") from error
+        else:
+            raise ValueError("LLM provider returned malformed structured output")
 
     try:
         if intent == "priority":

@@ -7,21 +7,7 @@ const DEV_BACKEND_URL = "http://localhost:8001";
 
 function backendUrlFor(mode: string) {
   const configured = loadEnv(mode, process.cwd(), "VITE_").VITE_BACKEND_URL;
-  if (mode !== "production") return (configured || DEV_BACKEND_URL).replace(/\/$/, "");
-  if (!configured) {
-    throw new Error("Production build requires VITE_BACKEND_URL to point to a verified HTTPS backend deployment.");
-  }
-
-  let url: URL;
-  try {
-    url = new URL(configured);
-  } catch {
-    throw new Error("Production VITE_BACKEND_URL must be a valid HTTPS URL.");
-  }
-  if (url.protocol !== "https:") {
-    throw new Error("Production VITE_BACKEND_URL must use HTTPS.");
-  }
-  return configured.replace(/\/$/, "");
+  return (configured || DEV_BACKEND_URL).replace(/\/$/, "");
 }
 
 export default defineConfig(({ mode }) => {

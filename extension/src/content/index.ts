@@ -12,7 +12,7 @@ import tokensCss from "../ui/styles/tokens.css?inline";
 (function () {
   if (window.location.hostname !== "mail.google.com") return;
 
-  let overlayShadow: ShadowRoot | null = null;
+  let overlayRoot: HTMLElement | null = null;
   let actionPanel: HTMLElement | null = null;
   let activeActionButton: HTMLButtonElement | null = null;
   let panelController: PanelController | null = null;
@@ -39,6 +39,7 @@ import tokensCss from "../ui/styles/tokens.css?inline";
   let lastNavigationKey = window.location.href;
   let currentEmailIdentity: string | null = null;
   let awaitingNavigatedEmail = false;
+  let lastEmailContext: EmailContext | null = null;
 
   function telemetryIntent(type: ExtensionMessage["type"]): string {
     return ({
@@ -121,8 +122,12 @@ import tokensCss from "../ui/styles/tokens.css?inline";
       state.pending = false;
       state.pendingPrompt = undefined;
     }
-    overlayShadow?.querySelector("#mailx-result")?.remove();
+    overlayRoot?.querySelector("#mailx-result")?.remove();
     actionPanel?.classList.remove("has-result");
+  }
+
+  function navigatedAway(): boolean {
+    return window.location.href !== lastNavigationKey;
   }
 
   function cancelRequestsAfterNavigation(): void {
@@ -139,7 +144,9 @@ import tokensCss from "../ui/styles/tokens.css?inline";
   function init(): void {
     const root = document.createElement("div");
     root.id = "mailx-root";
-    overlayShadow = root.attachShadow({ mode: "closed" });
+    root.style.cssText = "all:initial;display:block;position:relative;";
+    overlayRoot = root;
+
     document.body.appendChild(root);
 
     addMessageToolbarStyles();
@@ -170,10 +177,10 @@ import tokensCss from "../ui/styles/tokens.css?inline";
 
 
   function syncActionPanel(): void {
-    if (!overlayShadow) return;
+    if (!overlayRoot) return;
     if (!actionPanel) {
       actionPanel = document.createElement("div");
-      overlayShadow.appendChild(actionPanel);
+      overlayRoot.appendChild(actionPanel);
 
       const host = {
         sendAiMessage,
@@ -190,10 +197,21 @@ import tokensCss from "../ui/styles/tokens.css?inline";
     const hasOpenEmail = Boolean(document.querySelector(".a3s"));
     const context = hasOpenEmail ? extractEmailContext() : null;
     if (panelController) {
-      if (awaitingNavigatedEmail && context?.id === currentEmailIdentity) return;
+      if (awaitingNavigatedEmail && context?.id === currentEmailIdentity) {
+        awaitingNavigatedEmail = false;
+      }
       awaitingNavigatedEmail = false;
-      currentEmailIdentity = context?.id || null;
-      panelController.setEmailContext(context);
+      if (context) {
+        lastEmailContext = context;
+        currentEmailIdentity = context.id;
+        panelController.setEmailContext(context);
+      } else if (currentEmailIdentity && !navigatedAway()) {
+        panelController.setEmailContext(lastEmailContext);
+      } else {
+        currentEmailIdentity = null;
+        lastEmailContext = null;
+        panelController.setEmailContext(null);
+      }
     }
     if (hasOpenEmail) {
       syncMessageToolbar();

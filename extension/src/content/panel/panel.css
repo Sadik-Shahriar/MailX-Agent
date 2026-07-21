@@ -39,12 +39,19 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.mailx-panel-launcher:active {
+  cursor: grabbing;
 }
 
 .mailx-panel-launcher img {
   width: 28px;
   height: 28px;
+  pointer-events: none;
 }
 
 .mailx-panel-header {

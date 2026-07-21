@@ -3,6 +3,9 @@ import { ChatResponse, EmailContext, ExtensionMessage, StructuredAiResult } from
 export type AiErrorResponse = { error: string };
 export type AiRuntimeResponse = ChatResponse | AiErrorResponse;
 export type StructuredDraft = Extract<StructuredAiResult, { kind: "draft" }>;
+export type InsertDraftResult =
+  | { ok: true; composer: HTMLElement }
+  | { ok: false; reason: "no_composer" };
 
 export interface PanelHost {
   sendAiMessage: (
@@ -15,6 +18,6 @@ export interface PanelHost {
   extractEmailContext: () => EmailContext | null;
   getComposeText: () => string;
   insertReply: (text: string, replace: boolean) => Promise<boolean>;
-  insertDraft: (draft: StructuredDraft, replace: boolean) => Promise<boolean>;
+  insertDraft: (draft: StructuredDraft, replace: boolean) => Promise<InsertDraftResult>;
   copyText: (text: string) => Promise<boolean>;
 }

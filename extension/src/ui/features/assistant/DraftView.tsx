@@ -90,10 +90,10 @@ export function DraftView({ host, context, onBack }: DraftViewProps) {
       return;
     }
     const inserted = await host.insertDraft(draft, replace);
-    if (inserted) {
+    if (inserted.ok) {
       showToast("Inserted draft in Gmail");
     } else {
-      showToast("Could not find a compose box.", "error");
+      showToast("Could not find a compose box. Try opening the compose window first.", "error");
     }
   };
 

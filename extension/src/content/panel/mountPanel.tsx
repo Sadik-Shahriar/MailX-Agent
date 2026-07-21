@@ -17,32 +17,30 @@ import fieldsCss from "../../ui/components/Fields.css?inline";
 import dialogCss from "../../ui/components/Dialog.css?inline";
 import panelCss from "./panel.css?inline";
 
+function scopeCss(css: string): string {
+  return `@scope (#mailx-root) {\n${css}\n}`;
+}
+
 export function mountPanel(container: HTMLElement, host: PanelHost): PanelController {
   const controller = new PanelController();
 
-  // Inject styles into the shadow root
   const styleEl = document.createElement("style");
   styleEl.textContent = [
     tokensCss,
-    baseCss,
-    componentsCss,
-    layoutCss,
-    segmentedControlCss,
-    buttonCss,
-    tabsCss,
-    feedbackCss,
-    fieldsCss,
-    dialogCss,
-    panelCss
+    scopeCss(baseCss),
+    scopeCss(componentsCss),
+    scopeCss(layoutCss),
+    scopeCss(segmentedControlCss),
+    scopeCss(buttonCss),
+    scopeCss(tabsCss),
+    scopeCss(feedbackCss),
+    scopeCss(fieldsCss),
+    scopeCss(dialogCss),
+    scopeCss(panelCss),
   ].join("\n");
-  
-  const rootNode = container.getRootNode() as ShadowRoot;
-  if (rootNode instanceof ShadowRoot) {
-    installThemeSync(rootNode.host as HTMLElement);
-    rootNode.appendChild(styleEl);
-  } else {
-    container.appendChild(styleEl);
-  }
+
+  installThemeSync(container.parentElement || document.documentElement);
+  container.appendChild(styleEl);
 
   const appContainer = document.createElement("div");
   appContainer.id = "mailx-react-root";
