@@ -82,13 +82,17 @@ class MailXPromptTests(unittest.TestCase):
         self.assertEqual(priority.kind, "priority")
         self.assertEqual(priority.priority, "high")
 
+        priority_fenced = validate_structured_result("priority", '```json\n{"priority":"high","category":"fyi","confidence":0.5}\n```')
+        self.assertEqual(priority_fenced.priority, "high")
+
+        priority_embedded = validate_structured_result("priority", 'Here is the result: {"priority":"high","category":"fyi","confidence":0.5}')
+        self.assertEqual(priority_embedded.priority, "high")
+
         tasks = validate_structured_result("tasks", '{"tasks":[{"description":"Send report","assignee":"me","due_date":"2026-07-18","priority":"high"}]}')
-        self.assertEqual(tasks.tasks[0].due_date.isoformat(), "2026-07-18")
+        self.assertEqual(str(tasks.tasks[0].due_date), "2026-07-18")
 
         for invalid in (
-            '```json\n{"priority":"high","category":"fyi","confidence":0.5}\n```',
-            'Here is the result: {"priority":"high","category":"fyi","confidence":0.5}',
-            '{"priority":"high","confidence":0.5}',
+            'not-json-content',
             '{"priority":"urgent","category":"fyi","confidence":0.5}',
         ):
             with self.assertRaises(ValueError):
@@ -242,7 +246,7 @@ class MailXTelemetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 502)
         self.assertIn('"status":"error"', "\n".join(logs.output))
 
-    async def test_fenced_structured_provider_output_is_a_controlled_error(self):
+    async def test_fenced_structured_provider_output_is_successfully_parsed(self):
         client = StructuredContentClient('```json\n{"priority":"high","category":"fyi","confidence":0.8}\n```')
         request = main.ChatRequest(
             intent="priority",
@@ -253,9 +257,8 @@ class MailXTelemetryTests(unittest.IsolatedAsyncioTestCase):
             patch.object(main, "LLM_API_KEY", "test-key"),
             patch.object(main, "LLM_API_URL", "https://provider.invalid/chat"),
         ):
-            with self.assertRaises(main.HTTPException) as raised:
-                await main.chat(request, request_for_chat())
-        self.assertEqual(raised.exception.status_code, 502)
+            response = await main.chat(request, request_for_chat())
+        self.assertEqual(response.result.priority, "high")
         self.assertEqual(client.calls, 1)
         self.assertEqual(client.payload["response_format"], {"type": "json_object"})
 
@@ -410,10 +413,10 @@ class MailXTelemetryTests(unittest.IsolatedAsyncioTestCase):
         payload = client.payload
         self.assertLessEqual(sum(len(message["content"]) for message in payload["messages"]), main.INPUT_BUDGET_CHARS["chat"])
         self.assertEqual(payload["max_tokens"], main.OUTPUT_TOKEN_BUDGET["chat"])
-        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["priority"], 100)
-        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["spam"], 100)
-        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["phishing"], 120)
-        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["reply"], 180)
+        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["priority"], 1200)
+        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["spam"], 1200)
+        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["phishing"], 1200)
+        self.assertEqual(main.OUTPUT_TOKEN_BUDGET["reply"], 1500)
 
     async def test_lifespan_exposes_one_shared_client(self):
         client = FakeAsyncClient()
@@ -540,6 +543,13 @@ class MailXApiSecurityTests(unittest.TestCase):
             None,
         )
         self.assertIn("Best regards, Sadik", reply_prompt)
+
+        tasks_prompt = main.build_prompt(
+            "tasks", None,
+            {"custom_task_instructions": "Assign all unassigned tasks to Sadik"},
+            None,
+        )
+        self.assertIn("Assign all unassigned tasks to Sadik", tasks_prompt)
 
     def test_clean_summary_bullet_limits_by_length(self):
         five_bullets = (

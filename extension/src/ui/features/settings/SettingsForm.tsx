@@ -349,6 +349,15 @@ export function SettingsForm() {
               onChange={(e) => updatePref("custom_draft_instructions", e.target.value)}
               rows={2}
             />
+
+            <TextareaField
+              label="Custom Task Extraction Rules"
+              helperText="Personalize how MailX identifies tasks, default assignees, or priority filters."
+              placeholder="e.g. Always assign tasks to 'Sadik' if unspecified; prioritize deliverables with hard dates"
+              value={prefs.custom_task_instructions || ""}
+              onChange={(e) => updatePref("custom_task_instructions", e.target.value)}
+              rows={2}
+            />
           </Section>
         </div>
 

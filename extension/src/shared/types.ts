@@ -26,6 +26,7 @@ export interface UserPreferences {
   custom_reply_instructions?: string;
   custom_summary_instructions?: string;
   custom_draft_instructions?: string;
+  custom_task_instructions?: string;
 }
 
 export type RequestSource = "explicit" | "automatic" | "unknown";

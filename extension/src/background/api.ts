@@ -10,10 +10,10 @@ function requireBackendUrl(): string {
 }
 
 export function backendDeadlineMs(intent: string): number {
-  if (["priority", "spam", "phishing"].includes(intent)) return 15_000;
-  if (intent === "reply") return 30_000;
-  if (["summary", "tasks"].includes(intent)) return 25_000;
-  return 40_000;
+  if (["priority", "spam", "phishing"].includes(intent)) return 50_000;
+  if (intent === "reply") return 65_000;
+  if (["summary", "summarize", "tasks"].includes(intent)) return 80_000;
+  return 85_000;
 }
 
 export async function checkModelStatus(model: string, accessToken?: string): Promise<ModelStatusResponse> {

@@ -87,7 +87,7 @@ describe("backend API client", () => {
 
     const request = chat({ intent: "priority" }, undefined, "test-access-token");
     const timeoutResult = expect(request).rejects.toThrow("The AI request timed out");
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(55_000);
 
     await timeoutResult;
   });

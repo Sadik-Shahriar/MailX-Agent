@@ -106,9 +106,10 @@ const defaultPreferences: UserPreferences = {
   custom_reply_instructions: "",
   custom_summary_instructions: "",
   custom_draft_instructions: "",
+  custom_task_instructions: "",
 };
 
-const PREFERENCES_SELECT_COLUMNS = "reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist, ai_model, thinking_mode, summary_length, custom_priority_rules, custom_reply_instructions, custom_summary_instructions, custom_draft_instructions";
+const PREFERENCES_SELECT_COLUMNS = "reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist, ai_model, thinking_mode, summary_length, custom_priority_rules, custom_reply_instructions, custom_summary_instructions, custom_draft_instructions, custom_task_instructions";
 
 export async function getPreferences(): Promise<UserPreferences> {
   const userId = await getUserId();
@@ -161,6 +162,21 @@ export async function getTasks(period?: 7 | 30 | 90): Promise<Task[]> {
   return data as Task[];
 }
 
+function sanitizeDueDate(dueDate?: string | null): string | null {
+  if (!dueDate) return null;
+  const trimmed = dueDate.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parsed = Date.parse(trimmed);
+  if (!isNaN(parsed)) {
+    try {
+      return new Date(parsed).toISOString().split("T")[0];
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function saveTasks(tasks: Omit<Task, "id" | "status" | "created_at">[]): Promise<Task[]> {
   const userId = await getUserId();
   if (!userId) {
@@ -173,7 +189,14 @@ export async function saveTasks(tasks: Omit<Task, "id" | "status" | "created_at"
     ]));
     const now = new Date().toISOString();
     const newTasks: Task[] = tasks.filter((task) => !existingByKey.has(`${task.email_id}:${normalized(task.description)}`))
-      .map((task) => ({ ...task, id: crypto.randomUUID(), status: "pending" as const, created_at: now }));
+      .map((task) => ({
+        ...task,
+        assignee: task.assignee?.trim() || "me",
+        due_date: sanitizeDueDate(task.due_date),
+        id: crypto.randomUUID(),
+        status: "pending" as const,
+        created_at: now,
+      }));
     const all = [...newTasks, ...existing];
     await chrome.storage.local.set({ tasks: all });
     return [...newTasks, ...tasks.map((task) => existingByKey.get(`${task.email_id}:${normalized(task.description)}`)).filter((task): task is Task => Boolean(task))];
@@ -195,7 +218,13 @@ export async function saveTasks(tasks: Omit<Task, "id" | "status" | "created_at"
   }
 
   const { data, error } = await supabase.from("tasks").insert(
-    newTasks.map((task) => ({ ...task, user_id: userId, status: "pending" }))
+    newTasks.map((task) => ({
+      ...task,
+      user_id: userId,
+      status: "pending",
+      assignee: task.assignee?.trim() || "me",
+      due_date: sanitizeDueDate(task.due_date),
+    }))
   ).select();
   if (error) throw error;
   await invalidateUserCache(userId);

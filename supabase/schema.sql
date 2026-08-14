@@ -27,7 +27,8 @@ alter table public.preferences
   add column if not exists custom_priority_rules text default '',
   add column if not exists custom_reply_instructions text default '',
   add column if not exists custom_summary_instructions text default '',
-  add column if not exists custom_draft_instructions text default '';
+  add column if not exists custom_draft_instructions text default '',
+  add column if not exists custom_task_instructions text default '';
 
 -- 2. Tasks (FR5)
 create table if not exists public.tasks (
@@ -37,7 +38,7 @@ create table if not exists public.tasks (
   email_subject text,
   email_sender text,
   description text not null,
-  assignee text not null default 'me',
+  assignee text default 'me',
   due_date date,
   priority text not null default 'medium'
     check (priority in ('high', 'medium', 'low')),
