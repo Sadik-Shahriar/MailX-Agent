@@ -153,7 +153,7 @@ function AppShell() {
           </div>
         )}
         <div role="tabpanel" id="panel-inbox" aria-labelledby="tab-inbox" hidden={activeTab !== "inbox"}>
-          {activeTab === "inbox" && <HomeView userEmail={userEmail} onFindPanel={handleFindPanel} />}
+          {activeTab === "inbox" && <HomeView userEmail={userEmail} onFindPanel={handleFindPanel} onNavigateTab={(tab) => setActiveTab(tab)} />}
         </div>
         <div role="tabpanel" id="panel-tasks" aria-labelledby="tab-tasks" hidden={activeTab !== "tasks"}>
           {activeTab === "tasks" && <TasksView />}

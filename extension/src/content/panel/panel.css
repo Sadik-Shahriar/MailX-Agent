@@ -20,21 +20,22 @@
 }
 
 #mailx-action-panel.mailx-collapsed {
-  width: 52px;
-  height: 52px;
-  border-radius: 26px;
+  width: 60px;
+  height: 60px;
+  border-radius: 30px;
   min-height: unset;
-  overflow: hidden;
+  overflow: visible;
   border: none;
   background: transparent;
-  box-shadow: 0 2px 10px rgba(30, 64, 115, 0.14);
+  box-shadow: none;
 }
 
 .mailx-panel-launcher {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -42,16 +43,118 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
+  position: relative;
 }
 
 .mailx-panel-launcher:active {
   cursor: grabbing;
 }
 
+.mailx-launcher-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  border: 2px solid #2563EB;
+  box-shadow: 0 8px 24px -2px rgba(37, 99, 235, 0.42), 0 2px 8px rgba(0, 0, 0, 0.14);
+  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms ease;
+  animation: mailx-launcher-pulse 3s infinite ease-in-out;
+}
+
+:root[data-theme="dark"] .mailx-launcher-icon-wrap,
+#mailx-action-panel[data-theme="dark"] .mailx-launcher-icon-wrap,
+#mailx-root[data-theme="dark"] .mailx-launcher-icon-wrap {
+  background: #1E293B;
+  border-color: #60A5FA;
+  box-shadow: 0 8px 24px -2px rgba(96, 165, 250, 0.45), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.mailx-panel-launcher:hover .mailx-launcher-icon-wrap {
+  transform: scale(1.1) translateY(-2px);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.52), 0 0 0 4px rgba(37, 99, 235, 0.25);
+  border-color: #1D4ED8;
+}
+
+.mailx-panel-launcher:active .mailx-launcher-icon-wrap {
+  transform: scale(0.96);
+}
+
 .mailx-panel-launcher img {
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
   pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.25));
+}
+
+.mailx-launcher-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
+  color: #FFFFFF;
+  font-size: var(--mx-type-xs);
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  line-height: 1.2;
+}
+
+:root[data-theme="dark"] .mailx-launcher-badge,
+#mailx-action-panel[data-theme="dark"] .mailx-launcher-badge,
+#mailx-root[data-theme="dark"] .mailx-launcher-badge {
+  background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+  border-color: #1E293B;
+}
+
+.mailx-launcher-pill {
+  position: absolute;
+  right: 72px;
+  top: 50%;
+  transform: translateY(-50%) translateX(6px);
+  white-space: nowrap;
+  background: #0F172A;
+  color: #FFFFFF;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease;
+  z-index: 10;
+}
+
+.mailx-panel-launcher:hover .mailx-launcher-pill {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+@keyframes mailx-launcher-pulse {
+  0%, 100% {
+    box-shadow: 0 8px 24px -2px rgba(37, 99, 235, 0.38), 0 2px 8px rgba(0, 0, 0, 0.12), 0 0 0 0 rgba(37, 99, 235, 0.4);
+  }
+  50% {
+    box-shadow: 0 10px 28px -2px rgba(37, 99, 235, 0.5), 0 2px 8px rgba(0, 0, 0, 0.12), 0 0 0 5px rgba(37, 99, 235, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mailx-launcher-icon-wrap {
+    animation: none !important;
+  }
+  .mailx-panel-launcher,
+  .mailx-launcher-pill {
+    transition: none !important;
+  }
 }
 
 .mailx-panel-header {

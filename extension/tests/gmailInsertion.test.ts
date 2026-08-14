@@ -55,7 +55,7 @@ describe("Gmail insertion", () => {
 
     await expect(insertDraftIntoGmail({
       kind: "draft", to: "ada@example.com", subject: "Project update", greeting: "Hello Ada,", body: "The project is on track.", sign_off: "Best,",
-    }, false)).resolves.toBe(true);
+    }, false)).resolves.toEqual({ ok: true, composer: expect.any(HTMLElement) });
 
     expect(recipient!.value).toBe("ada@example.com");
     expect(subject!.value).toBe("Project update");
@@ -75,7 +75,7 @@ describe("Gmail insertion", () => {
     await expect(insertReplyIntoGmail("Reply", false)).resolves.toBe(false);
     await expect(insertDraftIntoGmail({
       kind: "draft", to: null, subject: "Subject", greeting: "Hello,", body: "Body", sign_off: "Regards,",
-    }, false)).resolves.toBe(false);
+    }, false)).resolves.toEqual({ ok: false, reason: "no_composer" });
   });
 
   test("recovers when Gmail does not open an editor or expose requested draft fields", async () => {
@@ -90,6 +90,6 @@ describe("Gmail insertion", () => {
     document.body.appendChild(compose);
     await expect(insertDraftIntoGmail({
       kind: "draft", to: "ada@example.com", subject: "Subject", greeting: "Hello,", body: "Body", sign_off: "Regards,",
-    }, false)).resolves.toBe(false);
+    }, false)).resolves.toEqual({ ok: false, reason: "no_composer" });
   });
 });

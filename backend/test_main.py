@@ -98,6 +98,7 @@ class MailXPromptTests(unittest.TestCase):
 class FakeAsyncClient:
     def __init__(self, *args, **kwargs):
         self.calls = 0
+        self.payload = None
 
     async def __aenter__(self):
         return self
@@ -110,6 +111,7 @@ class FakeAsyncClient:
 
     async def post(self, url, **kwargs):
         self.calls += 1
+        self.payload = kwargs.get("json")
         return httpx.Response(200, json={
             "model": "test-model",
             "choices": [{
@@ -472,10 +474,91 @@ class MailXApiSecurityTests(unittest.TestCase):
                 response = client.post("/chat", json={
                     "intent": "summarize",
                     "email_context": {"body": "Project status is ready"},
+                    "thinking_mode": True,
+                    "model": "hy3-free",
                 })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(provider.calls, 1)
+        self.assertEqual(provider.payload["model"], "hy3-free")
+        self.assertEqual(provider.payload["thinking"], {"type": "enabled"})
+
+    def test_models_status_returns_availability_and_rate_limit(self):
+        main.app.dependency_overrides[main.require_authenticated_user] = lambda: main.AuthenticatedUser(id="user-1")
+        available_client = SequenceAsyncClient([httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})])
+        with (
+            patch.object(main.httpx, "AsyncClient", return_value=available_client),
+            patch.object(main, "LLM_API_KEY", "test-key"),
+            patch.object(main, "LLM_API_URL", "https://provider.invalid/chat"),
+        ):
+            with TestClient(main.app) as client:
+                resp = client.get("/models/status?model=nemotron-3.5-lightning-free")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "available")
+        self.assertEqual(data["model"], "nemotron-3.5-lightning-free")
+
+        rate_limited_client = SequenceAsyncClient([httpx.Response(429, json={"error": "rate limited"})])
+        with (
+            patch.object(main.httpx, "AsyncClient", return_value=rate_limited_client),
+            patch.object(main, "LLM_API_KEY", "test-key"),
+            patch.object(main, "LLM_API_URL", "https://provider.invalid/chat"),
+        ):
+            with TestClient(main.app) as client:
+                resp2 = client.get("/models/status?model=deepseek-v4-flash-free")
+        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(resp2.json()["status"], "rate_limited")
+
+    def test_clean_summary_filters_reasoning_and_analysis_headers(self):
+        leaked_output = (
+            "• Analyze User Input: • User wants a summary of an untrusted email\n"
+            "• Provided Data: An email about monthly cloud invoice\n"
+            "• The monthly Google Cloud invoice is available as a PDF attachment\n"
+            "• The balance will be automatically charged with no action needed\n"
+        )
+        cleaned = main.clean_summary(leaked_output)
+        self.assertNotIn("Analyze User Input", cleaned)
+        self.assertNotIn("Provided Data", cleaned)
+        self.assertIn("monthly Google Cloud invoice is available", cleaned)
+
+    def test_build_prompt_incorporates_summary_length_and_custom_instructions(self):
+        prompt_short = main.build_prompt("summarize", None, {"summary_length": "short"}, None)
+        self.assertIn("up to two very concise", prompt_short)
+
+        prompt_long = main.build_prompt("summarize", None, {"summary_length": "long"}, None)
+        self.assertIn("up to five detailed comprehensive", prompt_long)
+
+        priority_prompt = main.build_prompt(
+            "priority", None,
+            {"custom_priority_rules": "Flag all emails from CEO or containing invoices as high priority"},
+            None,
+        )
+        self.assertIn("Flag all emails from CEO or containing invoices as high priority", priority_prompt)
+
+        reply_prompt = main.build_prompt(
+            "reply", None,
+            {"custom_reply_instructions": "Sign off with 'Best regards, Sadik' and be brief"},
+            None,
+        )
+        self.assertIn("Best regards, Sadik", reply_prompt)
+
+    def test_clean_summary_bullet_limits_by_length(self):
+        five_bullets = (
+            "• First point about project kickoff\n"
+            "• Second point about deadlines\n"
+            "• Third point about team assignments\n"
+            "• Fourth point about weekly standups\n"
+            "• Fifth point about final deliverables\n"
+        )
+        short_res = main.clean_summary(five_bullets, summary_length="short")
+        self.assertEqual(len(short_res.splitlines()), 2)
+
+        med_res = main.clean_summary(five_bullets, summary_length="medium")
+        self.assertEqual(len(med_res.splitlines()), 3)
+
+        long_res = main.clean_summary(five_bullets, summary_length="long")
+        self.assertEqual(len(long_res.splitlines()), 5)
 
 
 if __name__ == "__main__":
     unittest.main()
+

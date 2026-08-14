@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect } from "react";
 import { PanelHost } from "../../../content/panel/PanelHost";
 import { ChatResponse, EmailContext } from "../../../shared/types";
 import { Button } from "../../components/Button";
-import { Spinner } from "../../components/Feedback";
+import { Spinner, useToast } from "../../components/Feedback";
 import { Dialog } from "../../components/Dialog";
 import ReactMarkdown from "react-markdown";
+import { parseReplyOptions } from "../../../shared/aiPolicy";
 import { getAiResponseState, responseText } from "./response";
 import {
   appendConversationMessage,
@@ -13,57 +14,36 @@ import {
   ConversationMessage,
   getConversation,
   isDraftPrompt,
+  isMailSendingPrompt,
 } from "./conversation";
 
 export interface ChatViewProps {
   host: PanelHost;
   context: EmailContext | null;
   onBack: () => void;
+  initialPrompt?: string;
 }
 
-export function ChatView({ host, context, onBack }: ChatViewProps) {
+export function ChatView({ host, context, onBack, initialPrompt }: ChatViewProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>(() => context ? getConversation(context.id, context.sender, context.subject) : []);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [showNewChatConfirm, setShowNewChatConfirm] = useState(false);
+  const { showToast } = useToast();
   const scrollRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<(() => void) | null>(null);
   const messageIdRef = useRef(0);
   const requestVersionRef = useRef(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const initialSentRef = useRef(false);
 
   const nextMessageId = () => `${Date.now()}-${++messageIdRef.current}`;
 
-  useEffect(() => {
-    setMessages(context ? getConversation(context.id, context.sender, context.subject) : []);
-    setInput("");
-  }, [context?.id, context?.sender, context?.subject]);
+  const submitPrompt = (promptText: string) => {
+    const prompt = promptText.trim();
+    if (!prompt || loading || !context) return;
 
-  useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    scrollRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages, loading]);
-
-  function cancelPending() {
-    requestVersionRef.current += 1;
-    cancelRef.current?.();
-    cancelRef.current = null;
-    setLoading(false);
-  }
-
-  useEffect(() => () => {
-    requestVersionRef.current += 1;
-    cancelRef.current?.();
-  }, []);
-
-  const handleSubmit = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!input.trim() || loading || !context) return;
-    
-    const prompt = input.trim();
+    const isMailTask = isDraftPrompt(prompt) || isMailSendingPrompt(prompt);
     const history = conversationHistory(messages);
     const userMessage: ConversationMessage = { id: nextMessageId(), role: "user", content: prompt };
     setMessages(appendConversationMessage(context.id, context.sender, context.subject, userMessage));
@@ -88,13 +68,58 @@ export function ChatView({ host, context, onBack }: ChatViewProps) {
           : responseState.state === "success"
             ? responseText(responseState.response)
             : "**Error:** MailX did not return a response. Please try again.";
+        const isDraft = responseState.state === "success" && (responseState.response?.result as any)?.kind === "draft";
+        const isReply = responseState.state === "success" && responseState.response?.intent === "reply";
+        const isInsertable = Boolean(isDraft || isReply || (isMailTask && responseState.state === "success"));
+
         setMessages(appendConversationMessage(context.id, context.sender, context.subject, {
-          id: nextMessageId(), role: "assistant", content: text,
+          id: nextMessageId(),
+          role: "assistant",
+          content: text,
           result: responseState.state === "success" ? responseState.response : undefined,
+          isInsertable,
         }));
       }
     );
     if (requestVersionRef.current === requestVersion) cancelRef.current = req.cancel;
+  };
+
+  useEffect(() => {
+    setMessages(context ? getConversation(context.id, context.sender, context.subject) : []);
+    setInput("");
+  }, [context?.id, context?.sender, context?.subject]);
+
+  useEffect(() => {
+    if (initialPrompt && !initialSentRef.current && context) {
+      initialSentRef.current = true;
+      submitPrompt(initialPrompt);
+    }
+  }, [initialPrompt, context]);
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView?.({ block: "end" });
+  }, [messages, loading]);
+
+  function cancelPending() {
+    requestVersionRef.current += 1;
+    cancelRef.current?.();
+    cancelRef.current = null;
+    setLoading(false);
+  }
+
+  useEffect(() => () => {
+    requestVersionRef.current += 1;
+    cancelRef.current?.();
+  }, []);
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!input.trim()) return;
+    submitPrompt(input);
   };
 
   const handleBack = () => {
@@ -118,11 +143,27 @@ export function ChatView({ host, context, onBack }: ChatViewProps) {
 
   const handleInsert = async (message: ConversationMessage) => {
     const response = message.result as ChatResponse | undefined;
-    if (!response) return;
-    if (response.result?.kind === "draft") {
-      await host.insertDraft(response.result, false);
+    if (response?.result?.kind === "draft") {
+      const res = await host.insertDraft(response.result, false);
+      if (res?.ok) {
+        showToast("Inserted draft in Gmail");
+      } else {
+        showToast("Could not find a compose box. Try opening the compose window first.", "error");
+      }
     } else {
-      await host.insertReply(message.content, false);
+      let textToInsert = message.content;
+      textToInsert = textToInsert.replace(/^R\d\s*[:.-]\s*/gim, "").trim();
+      textToInsert = textToInsert.replace(/^```[a-zA-Z]*\n?([\s\S]*?)\n?```$/g, "$1").trim();
+      const replies = parseReplyOptions(textToInsert);
+      if (replies.length > 0) {
+        textToInsert = replies[0];
+      }
+      const ok = await host.insertReply(textToInsert, false);
+      if (ok) {
+        showToast("Inserted in Gmail");
+      } else {
+        showToast("Could not find a reply box. Try opening one first.", "error");
+      }
     }
   };
 
@@ -167,11 +208,16 @@ export function ChatView({ host, context, onBack }: ChatViewProps) {
               }}>
                 {msg.role === "user" ? msg.content : <ReactMarkdown>{msg.content}</ReactMarkdown>}
               </div>
-              {msg.role === "assistant" && (msg.result as ChatResponse | undefined)?.intent === "reply" && (
-                <Button variant="secondary" type="button" onClick={() => void handleInsert(msg)} style={{ marginTop: 8 }}>Insert reply</Button>
-              )}
-              {msg.role === "assistant" && (msg.result as ChatResponse | undefined)?.result?.kind === "draft" && (
-                <Button variant="secondary" type="button" onClick={() => void handleInsert(msg)} style={{ marginTop: 8 }}>Insert draft</Button>
+              {msg.role === "assistant" && !msg.content.startsWith("**Error:**") && (msg.isInsertable || (msg.result as ChatResponse | undefined)?.result?.kind === "draft" || (msg.result as ChatResponse | undefined)?.intent === "reply") && (
+                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                  {(msg.result as ChatResponse | undefined)?.result?.kind === "draft" ? (
+                    <Button variant="secondary" type="button" onClick={() => void handleInsert(msg)}>Insert draft</Button>
+                  ) : (msg.result as ChatResponse | undefined)?.intent === "reply" ? (
+                    <Button variant="secondary" type="button" onClick={() => void handleInsert(msg)}>Insert reply</Button>
+                  ) : (
+                    <Button variant="secondary" type="button" onClick={() => void handleInsert(msg)}>Insert in Gmail</Button>
+                  )}
+                </div>
               )}
             </div>
           ))

@@ -1,4 +1,4 @@
-import { backendDeadlineMs, chat } from "./api";
+import { backendDeadlineMs, chat, checkModelStatus } from "./api";
 import { setupReminderAlarm, handleReminderCheck } from "./reminders";
 import { ExtensionMessage, RequestTelemetry, StructuredAiResult, Task } from "../shared/types";
 import { CacheTelemetryEvent, getOrSetCache } from "../shared/cache";
@@ -108,8 +108,6 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
         const session = await getSession();
         if (!session) throw new Error("Sign in before using MailX AI tools.");
         if (signal.aborted) throw abortReason(signal);
-        // Replies, drafts, and task extraction must reflect the current message and
-        // user intent; caching them can surface a response from another Gmail thread.
         const isCacheable = msg.type === "SUMMARIZE" || msg.type === "CLASSIFY_PRIORITY";
         const content = msg.type === "SUMMARIZE"
           ? { body: msg.email_context?.body || "" }
@@ -118,18 +116,16 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
             subject: msg.email_context?.subject || "",
             snippet: msg.email_context?.snippet || "",
           };
+        const userPreferences = await getPreferences();
         const cacheKey = isCacheable && msg.email_context
-          ? await responseCacheKey(session.user.id, intentMap[msg.type] as "summarize" | "priority", content)
+          ? await responseCacheKey(session.user.id, intentMap[msg.type] as "summarize" | "priority", content, userPreferences)
           : "";
-        const preferences = msg.type === "SUGGEST_REPLIES" || msg.type === "GENERATE_DRAFT"
-          ? { reply_tone: (await getPreferences()).reply_tone }
-          : undefined;
         const request = {
           intent: intentMap[msg.type] || "chat",
           email_context: msg.email_context,
           prompt: msg.prompt,
           history: msg.history,
-          preferences,
+          preferences: userPreferences,
           telemetry,
         };
         const lane = queueLaneForMessage(msg.type);
@@ -234,6 +230,11 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
     case "GET_STATS": return getStats(msg.period || 7, undefined, msg.refresh === true);
     case "GET_PREFERENCES": return getPreferences();
     case "SAVE_PREFERENCES": return savePreferences(msg.preferences || {});
+    case "CHECK_MODEL_STATUS": {
+      const session = await getSession();
+      if (!session) throw new Error("Sign in before checking model status.");
+      return await checkModelStatus(msg.model || "", session.access_token);
+    }
 
     case "SIGN_IN": {
       await signInWithGoogle();

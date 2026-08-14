@@ -19,6 +19,13 @@ export interface UserPreferences {
   spam_blacklist: string[];
   phishing_sensitivity: "low" | "default" | "high";
   phishing_allowlist: string[];
+  ai_model?: string;
+  thinking_mode?: boolean;
+  summary_length?: "short" | "medium" | "long";
+  custom_priority_rules?: string;
+  custom_reply_instructions?: string;
+  custom_summary_instructions?: string;
+  custom_draft_instructions?: string;
 }
 
 export type RequestSource = "explicit" | "automatic" | "unknown";
@@ -69,6 +76,13 @@ export interface UrlVerdict {
   source: "allowlist" | "heuristic" | "llm";
 }
 
+export interface ModelStatusResponse {
+  model: string;
+  status: "available" | "rate_limited" | "unsupported" | "error";
+  latency_ms: number;
+  message: string;
+}
+
 export interface ChatRequest {
   intent: string;
   email_context?: EmailContext;
@@ -76,6 +90,8 @@ export interface ChatRequest {
   prompt?: string;
   history?: ChatMessage[];
   telemetry?: RequestTelemetry;
+  model?: string;
+  thinking_mode?: boolean;
 }
 
 export type StructuredAiResult =
@@ -133,6 +149,7 @@ export type MessageType =
   | "GET_STATS"
   | "GET_PREFERENCES"
   | "SAVE_PREFERENCES"
+  | "CHECK_MODEL_STATUS"
   | "GET_STATUS"
   | "SIGN_IN"
   | "SIGN_OUT"
@@ -154,6 +171,7 @@ export interface ExtensionMessage {
   period?: 7 | 30 | 90;
   refresh?: boolean;
   preferences?: Partial<UserPreferences>;
+  model?: string;
   url?: string;
   telemetry?: RequestTelemetry;
   request_id?: string;

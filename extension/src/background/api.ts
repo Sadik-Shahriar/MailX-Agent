@@ -1,4 +1,4 @@
-import { ChatRequest, ChatResponse } from "../shared/types";
+import { ChatRequest, ChatResponse, ModelStatusResponse } from "../shared/types";
 import { elapsedMs, ensureRequestTelemetry, logTelemetry } from "../shared/telemetry";
 import { abortReason, createDeadlineSignal, RequestTimeoutError } from "../shared/abort";
 
@@ -16,10 +16,27 @@ export function backendDeadlineMs(intent: string): number {
   return 40_000;
 }
 
+export async function checkModelStatus(model: string, accessToken?: string): Promise<ModelStatusResponse> {
+  if (!accessToken) throw new Error("Sign in before checking model status.");
+  const url = new URL(`${requireBackendUrl()}/models/status`);
+  if (model) url.searchParams.set("model", model);
+  const resp = await fetch(url.toString(), {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`API error ${resp.status}: ${text}`);
+  }
+  return await resp.json() as ModelStatusResponse;
+}
+
 export async function chat(req: ChatRequest, parentSignal?: AbortSignal, accessToken?: string): Promise<ChatResponse> {
   if (!accessToken) throw new Error("Sign in before using MailX AI tools.");
   const telemetry = ensureRequestTelemetry(req.telemetry);
-  req = { ...req, telemetry };
+  const model = req.model || req.preferences?.ai_model;
+  const thinking_mode = req.thinking_mode ?? req.preferences?.thinking_mode;
+  req = { ...req, telemetry, model, thinking_mode };
   const startedAt = Date.now();
   const deadline = createDeadlineSignal(parentSignal, backendDeadlineMs(req.intent));
   let resp: Response;
@@ -52,7 +69,7 @@ export async function chat(req: ChatRequest, parentSignal?: AbortSignal, accessT
         backend_round_trip_ms: elapsedMs(startedAt),
       });
       errorLogged = true;
-      if (text.includes("LLM API error: 429")) {
+      if (text.includes("LLM API error: 429") || resp.status === 429) {
         throw new Error("The AI service is busy. Please try again shortly.");
       }
       throw new Error(`API error ${resp.status}: ${text}`);

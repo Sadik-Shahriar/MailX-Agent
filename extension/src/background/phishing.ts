@@ -45,7 +45,7 @@ export async function checkUrl(
     }
   }
   const preferences = await loadPreferences();
-  if (preferences.phishing_allowlist.includes(hostname)) {
+  if ((preferences.phishing_allowlist || []).includes(hostname)) {
     return { url: rawUrl, hostname, verdict: "clean", confidence: 1, reason: "Domain is on your safe list.", heuristics: [], source: "allowlist" };
   }
   const signals: string[] = [];

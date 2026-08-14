@@ -3,6 +3,7 @@ import type { ChatMessage } from "../../../shared/types";
 export interface ConversationMessage extends ChatMessage {
   id: string;
   result?: unknown;
+  isInsertable?: boolean;
 }
 
 const MAX_CONVERSATIONS = 3;
@@ -43,6 +44,10 @@ export function conversationHistory(messages: ConversationMessage[]): ChatMessag
 
 export function isDraftPrompt(prompt: string): boolean {
   return /\b(draft|compose|new email|write (?:an )?email|generate (?:an )?email)\b/i.test(prompt);
+}
+
+export function isMailSendingPrompt(prompt: string): boolean {
+  return /\b(draft|compose|reply|replies|response|respond|write (?:an? )?(?:email|reply|response|mail|message)|generate (?:an? )?(?:email|reply|response|mail|draft)|suggest (?:a )?reply|send (?:an? )?(?:email|reply|mail|message|follow-?up)|create (?:an? )?(?:email|reply|response|draft))\b/i.test(prompt);
 }
 
 export function resetConversationsForTests(): void {

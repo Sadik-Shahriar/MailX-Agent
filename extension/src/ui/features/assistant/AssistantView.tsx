@@ -142,6 +142,8 @@ export function AssistantView({ host, emailContext, externalAction, onExternalAc
     }
   };
 
+  const [chatInitialPrompt, setChatInitialPrompt] = useState<string | undefined>(undefined);
+
   if (activeView === "result") {
     return <ResultView 
       host={host} 
@@ -150,11 +152,16 @@ export function AssistantView({ host, emailContext, externalAction, onExternalAc
       pending={resultPending}
       onBack={() => { cancelResultRequest(); returnToActions(); }}
       onCancel={() => { cancelResultRequest(); returnToActions(); }}
+      onAskQuestion={(question) => {
+        cancelResultRequest();
+        setChatInitialPrompt(question);
+        setActiveView("chat");
+      }}
     />;
   }
 
   if (activeView === "chat") {
-    return <ChatView host={host} context={context} onBack={returnToActions} />;
+    return <ChatView host={host} context={context} onBack={() => { setChatInitialPrompt(undefined); returnToActions(); }} initialPrompt={chatInitialPrompt} />;
   }
 
   if (activeView === "draft") {

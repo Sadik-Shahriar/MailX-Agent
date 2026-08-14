@@ -247,6 +247,19 @@ import tokensCss from "../ui/styles/tokens.css?inline";
       toolbar.dataset.mailxMessage = key;
       toolbar.setAttribute("role", "toolbar");
       toolbar.setAttribute("aria-label", "MailX message actions");
+
+      const brand = document.createElement("span");
+      brand.className = "mailx-toolbar-brand";
+      brand.setAttribute("aria-hidden", "true");
+      const brandLogo = document.createElement("img");
+      brandLogo.src = chrome.runtime.getURL("public/icons/mailx-logo.png");
+      brandLogo.alt = "";
+      brand.appendChild(brandLogo);
+      const brandText = document.createElement("span");
+      brandText.textContent = "MailX";
+      brand.appendChild(brandText);
+      toolbar.appendChild(brand);
+
       for (const [action, label] of [["priority", "Priority"], ["spam", "Spam Check"], ["safety", "Link Safety"]]) {
         const button = document.createElement("button");
         button.type = "button";
@@ -413,19 +426,22 @@ import tokensCss from "../ui/styles/tokens.css?inline";
 
     if (action === "spam") {
       if (activeActionButton) return;
-      const bodyText = (bodyElement || getLatestVisibleEmailBody())?.innerText.trim();
-      if (!bodyText) return;
+      const bodyContent = ctx?.body?.trim() || (bodyElement || getLatestVisibleEmailBody())?.textContent?.trim() || "";
+      if (!bodyContent) {
+        showToast("Open an email with content to check for spam.", "error");
+        return;
+      }
       setActionLoading(button, true);
       sendAiMessage({ type: "CHECK_SPAM", email_context: ctx! } as ExtensionMessage, "explicit", "message_toolbar", (res) => {
         setActionLoading(button, false);
         const toolbar = button.closest<HTMLElement>(".mailx-message-toolbar");
-         if (toolbar && res?.spam) {
-           const text = `Spam: ${res.spam.verdict.toUpperCase()}${res.spam.confidence ? ` (${(res.spam.confidence * 100).toFixed(0)}%)` : ''}`;
-           setToolbarStatus(toolbar, "spam", text, res.spam.verdict === "spam" ? "danger" : "safe");
-            securityResults.set(toolbar, { type: "spam", context: ctx, status: "result", result: res.spam as SpamResult, retry: () => handleAction("spam", button, ctx, bodyElement) });
-         } else if (toolbar) {
-            setToolbarStatus(toolbar, "spam", "Spam: unavailable");
-            securityResults.set(toolbar, { type: "spam", context: ctx, status: "unavailable", message: "MailX could not check this email for spam.", retry: () => handleAction("spam", button, ctx, bodyElement) });
+        if (toolbar && res?.spam) {
+          const text = `Spam: ${res.spam.verdict.toUpperCase()}${res.spam.confidence ? ` (${(res.spam.confidence * 100).toFixed(0)}%)` : ''}`;
+          setToolbarStatus(toolbar, "spam", text, res.spam.verdict === "spam" ? "danger" : "safe");
+          securityResults.set(toolbar, { type: "spam", context: ctx, status: "result", result: res.spam as SpamResult, retry: () => handleAction("spam", button, ctx, bodyElement) });
+        } else if (toolbar) {
+          setToolbarStatus(toolbar, "spam", "Spam: unavailable");
+          securityResults.set(toolbar, { type: "spam", context: ctx, status: "unavailable", message: "MailX could not check this email for spam.", retry: () => handleAction("spam", button, ctx, bodyElement) });
         }
       });
       return;

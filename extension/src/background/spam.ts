@@ -8,7 +8,8 @@ function senderAddress(sender: string): string {
   return (sender.match(/<([^>]+)>/)?.[1] || sender).trim().toLowerCase();
 }
 
-function matchesRule(sender: string, rules: string[]): boolean {
+function matchesRule(sender: string, rules?: string[]): boolean {
+  if (!rules || !Array.isArray(rules) || !rules.length) return false;
   const address = senderAddress(sender);
   const domain = address.split("@")[1] || "";
   return rules.some((rule) => {

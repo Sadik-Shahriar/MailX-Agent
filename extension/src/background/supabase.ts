@@ -99,7 +99,16 @@ const defaultPreferences: UserPreferences = {
   spam_blacklist: [],
   phishing_sensitivity: "default",
   phishing_allowlist: [],
+  ai_model: "hy3-free",
+  thinking_mode: false,
+  summary_length: "medium",
+  custom_priority_rules: "",
+  custom_reply_instructions: "",
+  custom_summary_instructions: "",
+  custom_draft_instructions: "",
 };
+
+const PREFERENCES_SELECT_COLUMNS = "reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist, ai_model, thinking_mode, summary_length, custom_priority_rules, custom_reply_instructions, custom_summary_instructions, custom_draft_instructions";
 
 export async function getPreferences(): Promise<UserPreferences> {
   const userId = await getUserId();
@@ -110,7 +119,7 @@ export async function getPreferences(): Promise<UserPreferences> {
   if (existing) return existing;
   const request = (async () => {
     const { data, error } = await getSupabaseClient()
-      .from("preferences").select("reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist").eq("user_id", userId).maybeSingle();
+      .from("preferences").select(PREFERENCES_SELECT_COLUMNS).eq("user_id", userId).maybeSingle();
     if (error) throw error;
     const value = { ...defaultPreferences, ...data };
     preferencesMemory.set(userId, { value, expiresAt: Date.now() + PREFERENCES_TTL_MS });
@@ -130,7 +139,7 @@ export async function savePreferences(preferences: Partial<UserPreferences>): Pr
   const current = await getPreferences();
   const values = { user_id: userId, ...current, ...preferences, updated_at: new Date().toISOString() };
   const { data, error } = await getSupabaseClient().from("preferences")
-    .upsert(values).select("reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist").single();
+    .upsert(values).select(PREFERENCES_SELECT_COLUMNS).single();
   if (error) throw error;
   const value = { ...defaultPreferences, ...data };
   preferencesMemory.set(userId, { value, expiresAt: Date.now() + PREFERENCES_TTL_MS });
@@ -154,7 +163,21 @@ export async function getTasks(period?: 7 | 30 | 90): Promise<Task[]> {
 
 export async function saveTasks(tasks: Omit<Task, "id" | "status" | "created_at">[]): Promise<Task[]> {
   const userId = await getUserId();
-  if (!userId) throw new Error("Sign in with Google to save extracted tasks.");
+  if (!userId) {
+    if (!tasks.length) return [];
+    const stored = await chrome.storage.local.get("tasks");
+    const existing = (stored.tasks || []) as Task[];
+    const normalized = (description: string) => description.trim().replace(/\s+/g, " ").toLowerCase();
+    const existingByKey = new Map(existing.map((task) => [
+      `${task.email_id}:${normalized(task.description)}`, task,
+    ]));
+    const now = new Date().toISOString();
+    const newTasks: Task[] = tasks.filter((task) => !existingByKey.has(`${task.email_id}:${normalized(task.description)}`))
+      .map((task) => ({ ...task, id: crypto.randomUUID(), status: "pending" as const, created_at: now }));
+    const all = [...newTasks, ...existing];
+    await chrome.storage.local.set({ tasks: all });
+    return [...newTasks, ...tasks.map((task) => existingByKey.get(`${task.email_id}:${normalized(task.description)}`)).filter((task): task is Task => Boolean(task))];
+  }
   if (!tasks.length) return [];
   const supabase = getSupabaseClient();
   const emailIds = [...new Set(tasks.map((task) => task.email_id))];

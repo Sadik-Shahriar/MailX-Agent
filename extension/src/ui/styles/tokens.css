@@ -1,4 +1,4 @@
-:root, #mailx-root {
+:root, :host, #mailx-root {
   color-scheme: light;
 
   /* Typography */

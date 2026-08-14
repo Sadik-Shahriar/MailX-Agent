@@ -92,7 +92,8 @@ async function openEditor(timeoutMs: number): Promise<HTMLElement | undefined> {
 
 function replaceComposerText(composer: HTMLElement): void {
   composer.focus();
-  composer.textContent = "";
+  document.execCommand("selectAll", false);
+  document.execCommand("delete", false);
   composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
 }
 
@@ -157,10 +158,12 @@ export async function insertDraftIntoGmail(draft: StructuredDraft, replace: bool
   await waitForStableDialog(2_000);
 
   if (isValidRecipient(draft.to)) {
-    trySetField(TO_SELECTORS, draft.to.trim());
+    const success = trySetField(TO_SELECTORS, draft.to.trim());
+    if (!success) return { ok: false, reason: "no_composer" };
   }
   if (draft.subject) {
-    trySetField(SUBJECT_SELECTORS, draft.subject);
+    const success = trySetField(SUBJECT_SELECTORS, draft.subject);
+    if (!success) return { ok: false, reason: "no_composer" };
   }
   if (replace) replaceComposerText(composer);
   insertComposerText(draftBody(draft), composer);

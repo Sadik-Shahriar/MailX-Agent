@@ -1,12 +1,33 @@
 .mailx-message-toolbar {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--mx-space-2);
   margin: 0 0 10px;
-  padding: var(--mx-space-2);
+  padding: 6px var(--mx-space-2);
   border: 1px solid var(--mx-divider);
   border-radius: var(--mx-radius-md);
   background: var(--mx-surface-subtle);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.mailx-toolbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 700 var(--mx-type-xs) var(--mx-font-family);
+  color: var(--mx-primary);
+  padding: 3px 8px;
+  background: var(--mx-primary-soft);
+  border-radius: var(--mx-radius-sm);
+  user-select: none;
+  margin-right: 2px;
+}
+
+.mailx-toolbar-brand img {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
 }
 
 .mailx-message-toolbar button {
@@ -17,12 +38,15 @@
   color: var(--mx-text-secondary);
   cursor: pointer;
   font: 600 var(--mx-type-xs) var(--mx-font-family);
-  transition: transform var(--mx-duration-fast) var(--mx-ease-out), background var(--mx-duration-fast) var(--mx-ease-out), color var(--mx-duration-fast) var(--mx-ease-out);
+  transition: transform var(--mx-duration-fast) var(--mx-ease-out), background var(--mx-duration-fast) var(--mx-ease-out), color var(--mx-duration-fast) var(--mx-ease-out), box-shadow var(--mx-duration-fast) var(--mx-ease-out), border-color var(--mx-duration-fast) var(--mx-ease-out);
 }
 
 .mailx-message-toolbar button:hover:not(:disabled):not([aria-invalid="true"]) {
   background: var(--mx-surface-raised);
+  color: var(--mx-primary);
+  border-color: var(--mx-primary);
   transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12);
 }
 
 .mailx-message-toolbar button:disabled,

@@ -19,7 +19,15 @@ alter table public.preferences
   add column if not exists spam_blacklist text[] not null default '{}',
   add column if not exists phishing_sensitivity text not null default 'default'
     check (phishing_sensitivity in ('low', 'default', 'high')),
-  add column if not exists phishing_allowlist text[] not null default '{}';
+  add column if not exists phishing_allowlist text[] not null default '{}',
+  add column if not exists ai_model text not null default 'hy3-free',
+  add column if not exists thinking_mode bool not null default false,
+  add column if not exists summary_length text not null default 'medium'
+    check (summary_length in ('short', 'medium', 'long')),
+  add column if not exists custom_priority_rules text default '',
+  add column if not exists custom_reply_instructions text default '',
+  add column if not exists custom_summary_instructions text default '',
+  add column if not exists custom_draft_instructions text default '';
 
 -- 2. Tasks (FR5)
 create table if not exists public.tasks (
@@ -41,7 +49,6 @@ create table if not exists public.tasks (
     lower(coalesce(email_id, '') || ':' || regexp_replace(btrim(description), '\s+', ' ', 'g'))
   ) stored not null,
   unique (user_id, dedupe_key)
-);
 
 -- 3. Follow-Up Reminders (FR6)
 create table if not exists public.reminders (

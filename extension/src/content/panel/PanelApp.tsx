@@ -46,12 +46,20 @@ export function PanelApp({ controller, host }: PanelAppProps) {
   const isLoggedInRef = useRef(false);
 
   // For dragging
-  const dragRef = useRef<{ isDragging: boolean; startX: number; startY: number; initialLeft: number; initialTop: number }>({
+  const dragRef = useRef<{
+    isDragging: boolean;
+    startX: number;
+    startY: number;
+    initialLeft: number;
+    initialTop: number;
+    didDrag?: boolean;
+  }>({
     isDragging: false,
     startX: 0,
     startY: 0,
     initialLeft: 0,
-    initialTop: 0
+    initialTop: 0,
+    didDrag: false
   });
 
   useEffect(() => {
@@ -230,16 +238,12 @@ export function PanelApp({ controller, host }: PanelAppProps) {
     if (!dragRef.current.isDragging) return;
     const dx = Math.abs(e.clientX - dragRef.current.startX);
     const dy = Math.abs(e.clientY - dragRef.current.startY);
-    const wasClick = dx < dragThreshold && dy < dragThreshold;
+    const didDrag = dx >= dragThreshold || dy >= dragThreshold;
     dragRef.current.isDragging = false;
+    dragRef.current.didDrag = didDrag;
     e.currentTarget.releasePointerCapture(e.pointerId);
 
-    if (wasClick && collapsed) {
-      toggleCollapse();
-      return;
-    }
-    
-    if (panelRef.current) {
+    if (didDrag && panelRef.current) {
       chrome.storage.local.set({ 
         mailx_panel_pos: { left: panelRef.current.style.left, top: panelRef.current.style.top } 
       });
@@ -269,12 +273,29 @@ export function PanelApp({ controller, host }: PanelAppProps) {
             tabIndex={0}
             aria-label="Open MailX"
             aria-expanded="false"
+            onClick={() => {
+              if (dragRef.current.didDrag) {
+                dragRef.current.didDrag = false;
+                return;
+              }
+              toggleCollapse();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggleCollapse();
+              }
+            }}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerUp}
           >
-            <img src={chrome.runtime.getURL("public/icons/mailx-logo.png")} alt="" />
+            <div className="mailx-launcher-icon-wrap">
+              <img src={chrome.runtime.getURL("public/icons/mailx-logo.png")} alt="" />
+              <span className="mailx-launcher-badge" aria-hidden="true">AI</span>
+            </div>
+            <span className="mailx-launcher-pill" aria-hidden="true">✨ MailX AI</span>
           </div>
         ) : (
           <>
@@ -285,10 +306,10 @@ export function PanelApp({ controller, host }: PanelAppProps) {
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerUp}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <img src={chrome.runtime.getURL("public/icons/mailx-logo.png")} alt="" style={{ width: 24, height: 24 }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <img src={chrome.runtime.getURL("public/icons/mailx-logo.png")} alt="" style={{ width: 28, height: 28, borderRadius: 6, filter: "drop-shadow(0 1px 3px rgba(37, 99, 235, 0.3))" }} />
                 <div style={{ display: "flex", flexDirection: "column" }}>
-                  <h1 ref={panelHeadingRef} tabIndex={-1} style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>MailX</h1>
+                  <h1 ref={panelHeadingRef} tabIndex={-1} style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>MailX</h1>
                   <span style={{ fontSize: 12, color: "var(--mx-text-secondary)" }}>
                     {hasOpenEmail ? "AI tools for this email" : "AI email drafting assistant"}
                   </span>
