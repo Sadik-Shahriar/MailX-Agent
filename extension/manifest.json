@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "MailX - AI Email Assistant",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyhF1PIxO+cUUGxWR7DrqYRo5asfMBfRzPYXVQXOgEl0AkMMY8OcnVAceC+xk1xrNIUmrYMYf202hBAbCETmfzdNGQNZMMLpgJD6Wchoy6ByGpyUi09+HP5Zypq4RX8bV+gH+5X/TKWhHVPcOLhOTwjBWPlnw+6O1hYbVcGLLH21cv3B+8uI3QFXor43Fffw58oYP/fO7FlbDvabJ1Vhd+y+p8iw/UNlcrnBa6KWnM3ixx1ksvn+2g/ce2SlRdRSMasARhLguW/up7Szvzx1w0Q5TPXo+lPiyfONsBPbZvGfvZWrhm/e8kQDPKw0wIZpFdeBMZ6xR81VPIkSmrITFxwIDAQAB",
   "description": "AI-powered Gmail assistant: summarize, reply, draft, prioritize, extract tasks",
   "permissions": [
     "storage",

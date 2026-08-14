@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 ENV_DIR = Path(__file__).resolve().parent
 load_dotenv(ENV_DIR / ".env", override=True)
 
-PROVIDER_TIMEOUT = httpx.Timeout(45.0, connect=15.0, write=30.0, pool=15.0)
+PROVIDER_TIMEOUT = httpx.Timeout(30.0, connect=5.0, write=15.0, pool=5.0)
 PROVIDER_LIMITS = httpx.Limits(
     max_connections=20,
     max_keepalive_connections=10,
