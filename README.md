@@ -70,30 +70,31 @@
 
 ```mermaid
 flowchart TD
-    subgraph Browser ["Chrome Browser / Gmail Client"]
-        GM[Gmail UI / mail.google.com]
-        CS["MailX Content Script (DOM Injected Bar)"]
-        PU["MailX Popup SPA (React 18)"]
-        SW["Background Service Worker (Manifest V3)"]
-        SS[("chrome.storage.session (Ephemeral Cache)")]
-        
+    subgraph Browser ["Browser & Gmail Client"]
+        GM["Gmail UI (mail.google.com)"]
+        CS["Content Script (DOM Injected Bar)"]
+        PU["Popup SPA (React 18)"]
+        SW["Background Service Worker"]
+        SS["chrome.storage.session (Cache)"]
+
         GM <--> CS
         CS <--> SW
         PU <--> SW
         SW <--> SS
     end
 
-    subgraph Backend ["Local / Cloud Infrastructure"]
+    subgraph Infrastructure ["Local & Cloud Infrastructure"]
         API["FastAPI Proxy Backend (Port 8001)"]
-        ZEN["OpenCode Zen API (Free High-Speed Models)"]
-        SUPA[("Supabase PostgreSQL (RLS + Auth)")]
-        
-        SW -->|POST /chat (Sanitized Request)| API
-        API -->|Secure API Key Proxy| ZEN
-        ZEN -->|Structured JSON Response| API
-        API -->|Relay Inference Result| SW
-        SW <-->|Google OAuth & Task Sync| SUPA
+        ZEN["OpenCode Zen API (LLM Engine)"]
+        SUPA["Supabase PostgreSQL (RLS & Auth)"]
+
+        API -->|"Inference Request"| ZEN
+        ZEN -->|"JSON Response"| API
     end
+
+    SW -->|"Sanitized POST /chat"| API
+    API -->|"Inference Result"| SW
+    SW <-->|"OAuth & Task Sync"| SUPA
 ```
 
 ---
