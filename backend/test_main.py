@@ -571,6 +571,101 @@ class MailXApiSecurityTests(unittest.TestCase):
         long_res = main.clean_summary(five_bullets, summary_length="long")
         self.assertEqual(len(long_res.splitlines()), 5)
 
+    def test_resolve_provider_for_model_separates_zen_and_deepseek(self):
+        with (
+            patch.object(main, "ZEN_API_KEY", "zen-test-key"),
+            patch.object(main, "GROQ_API_KEY", "groq-test-key"),
+            patch.object(main, "DEEPSEEK_API_KEY", "deepseek-test-key"),
+            patch.object(main, "LLM_API_URL", main.ZEN_API_URL),
+        ):
+            p_zen1, url_zen1, key_zen1, m_zen1 = main.resolve_provider_for_model("hy3-free")
+            self.assertEqual(p_zen1, "zen")
+            self.assertEqual(url_zen1, main.ZEN_API_URL)
+            self.assertEqual(key_zen1, "zen-test-key")
+            self.assertEqual(m_zen1, "hy3-free")
+
+            p_groq1, url_groq1, key_groq1, m_groq1 = main.resolve_provider_for_model("llama-3.3-70b-versatile")
+            self.assertEqual(p_groq1, "groq")
+            self.assertEqual(url_groq1, main.GROQ_API_URL)
+            self.assertEqual(key_groq1, "groq-test-key")
+            self.assertEqual(m_groq1, "llama-3.3-70b-versatile")
+
+            p_ds1, url_ds1, key_ds1, m_ds1 = main.resolve_provider_for_model("deepseek-v4-flash")
+            self.assertEqual(p_ds1, "deepseek")
+            self.assertEqual(url_ds1, main.DEEPSEEK_API_URL)
+            self.assertEqual(key_ds1, "deepseek-test-key")
+            self.assertEqual(m_ds1, "deepseek-v4-flash")
+
+    def test_groq_model_without_key_raises_error(self):
+        main.app.dependency_overrides[main.require_authenticated_user] = lambda: main.AuthenticatedUser(id="user-1")
+        with (
+            patch.object(main, "ZEN_API_KEY", "zen-test-key"),
+            patch.object(main, "GROQ_API_KEY", None),
+            patch.object(main, "LLM_API_URL", main.ZEN_API_URL),
+        ):
+            with TestClient(main.app) as client:
+                resp = client.post("/chat", json={
+                    "intent": "summarize",
+                    "email_context": {"body": "Project status is ready"},
+                    "model": "llama-3.3-70b-versatile",
+                })
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn("GROQ_API_KEY is not configured", resp.json()["detail"])
+
+    def test_groq_model_omits_thinking_payload(self):
+        provider = FakeAsyncClient()
+        main.app.dependency_overrides[main.require_authenticated_user] = lambda: main.AuthenticatedUser(id="user-1")
+        with (
+            patch.object(main.httpx, "AsyncClient", return_value=provider),
+            patch.object(main, "GROQ_API_KEY", "groq-test-key"),
+            patch.object(main, "LLM_API_URL", main.GROQ_API_URL),
+        ):
+            with TestClient(main.app) as client:
+                response = client.post("/chat", json={
+                    "intent": "summarize",
+                    "email_context": {"body": "Project status is ready"},
+                    "model": "llama-3.3-70b-versatile",
+                    "thinking_mode": False,
+                })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.payload["model"], "llama-3.3-70b-versatile")
+        self.assertNotIn("thinking", provider.payload)
+
+    def test_official_deepseek_model_without_key_raises_error(self):
+        main.app.dependency_overrides[main.require_authenticated_user] = lambda: main.AuthenticatedUser(id="user-1")
+        with (
+            patch.object(main, "ZEN_API_KEY", "zen-test-key"),
+            patch.object(main, "DEEPSEEK_API_KEY", None),
+            patch.object(main, "LLM_API_URL", main.ZEN_API_URL),
+        ):
+            with TestClient(main.app) as client:
+                resp = client.post("/chat", json={
+                    "intent": "summarize",
+                    "email_context": {"body": "Project status is ready"},
+                    "model": "deepseek-v4-flash",
+                })
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn("DEEPSEEK_API_KEY is not configured", resp.json()["detail"])
+
+    def test_official_deepseek_model_explicitly_disables_thinking_when_off(self):
+        provider = FakeAsyncClient()
+        main.app.dependency_overrides[main.require_authenticated_user] = lambda: main.AuthenticatedUser(id="user-1")
+        with (
+            patch.object(main.httpx, "AsyncClient", return_value=provider),
+            patch.object(main, "DEEPSEEK_API_KEY", "deepseek-test-key"),
+            patch.object(main, "LLM_API_URL", main.DEEPSEEK_API_URL),
+        ):
+            with TestClient(main.app) as client:
+                response = client.post("/chat", json={
+                    "intent": "summarize",
+                    "email_context": {"body": "Project status is ready"},
+                    "model": "deepseek-v4-flash",
+                    "thinking_mode": False,
+                })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider.payload["model"], "deepseek-v4-flash")
+        self.assertEqual(provider.payload["thinking"], {"type": "disabled"})
+
 
 if __name__ == "__main__":
     unittest.main()

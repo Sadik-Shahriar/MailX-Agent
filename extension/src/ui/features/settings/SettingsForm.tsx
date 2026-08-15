@@ -109,12 +109,35 @@ export function SettingsForm() {
 
   const [activeCategory, setActiveCategory] = useState<"ai" | "rules" | "writing" | "reminders" | "safety" | "appearance" | null>(null);
 
+  function formatModelLabel(modelId?: string): string {
+    switch (modelId) {
+      case "hy3-free":
+        return "HY3 (Free)";
+      case "deepseek-v4-flash-free":
+        return "DeepSeek v4 Flash (Free)";
+      case "nemotron-3-ultra-free":
+        return "Nemotron 3 Ultra (Free)";
+      case "nemotron-3.5-lightning-free":
+        return "Nemotron 3.5 Lightning (Free)";
+      case "mimo-v2.5-free":
+        return "MiMo v2.5 (Free)";
+      case "llama-3.3-70b-versatile":
+        return "Llama 3.3 70B (Groq Free)";
+      case "llama-3.1-8b-instant":
+        return "Llama 3.1 8B (Groq Free)";
+      case "deepseek-v4-flash":
+        return "DeepSeek v4 Flash (Paid API)";
+      default:
+        return modelId || "HY3 (Free)";
+    }
+  }
+
   const categories = [
     {
       id: "ai" as const,
       label: "AI Engine & Models",
       icon: "⚡",
-      subtitle: `Model: ${prefs.ai_model || "hy3-free"} • ${prefs.thinking_mode ? "Thinking ON" : "Fast mode"}`,
+      subtitle: `Model: ${formatModelLabel(prefs.ai_model)} • ${prefs.thinking_mode ? "Thinking ON" : "Fast mode"}`,
     },
     {
       id: "rules" as const,
@@ -258,12 +281,51 @@ export function SettingsForm() {
                 setModelCheckError("");
               }}
             >
-              <option value="hy3-free">⚡ HY3 (Recommended, Fast & Free)</option>
-              <option value="nemotron-3-ultra-free">⚡ NVIDIA Nemotron 3 Ultra (Free)</option>
-              <option value="nemotron-3.5-lightning-free">NVIDIA Nemotron 3.5 Lightning (Free)</option>
-              <option value="mimo-v2.5-free">MiMo v2.5 (Free)</option>
-              <option value="deepseek-v4-flash-free">DeepSeek v4 Flash (Free)</option>
+              <optgroup label="Free Tier (OpenCode Zen API)">
+                <option value="hy3-free">⚡ HY3 (Recommended, Fast & Free)</option>
+                <option value="deepseek-v4-flash-free">DeepSeek v4 Flash (Free - Zen)</option>
+                <option value="nemotron-3-ultra-free">⚡ NVIDIA Nemotron 3 Ultra (Free)</option>
+                <option value="nemotron-3.5-lightning-free">NVIDIA Nemotron 3.5 Lightning (Free)</option>
+                <option value="mimo-v2.5-free">MiMo v2.5 (Free)</option>
+              </optgroup>
+              <optgroup label="Free Tier (Groq Cloud API - Fast LPU)">
+                <option value="llama-3.3-70b-versatile">⚡ Llama 3.3 70B Versatile (Free - Groq)</option>
+                <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant (Free - Groq)</option>
+              </optgroup>
+              <optgroup label="DeepSeek Direct API (Paid)">
+                <option value="deepseek-v4-flash">DeepSeek v4 Flash (Paid API - Fast Non-Thinking)</option>
+              </optgroup>
             </SelectField>
+
+            {(prefs.ai_model === "llama-3.3-70b-versatile" || prefs.ai_model === "llama-3.1-8b-instant") && (
+              <div style={{
+                marginTop: 8,
+                padding: "8px 12px",
+                borderRadius: "var(--mx-radius-sm)",
+                background: "rgba(16, 185, 129, 0.1)",
+                border: "1px solid rgba(16, 185, 129, 0.25)",
+                fontSize: 12,
+                color: "var(--mx-text-secondary)",
+                lineHeight: 1.4,
+              }}>
+                <strong style={{ color: "var(--mx-text)" }}>⚡ Groq Free Tier Active:</strong> High-speed LPU inference. Requires <code>GROQ_API_KEY</code> configured in <code>backend/.env</code>.
+              </div>
+            )}
+
+            {prefs.ai_model === "deepseek-v4-flash" && (
+              <div style={{
+                marginTop: 8,
+                padding: "8px 12px",
+                borderRadius: "var(--mx-radius-sm)",
+                background: "rgba(245, 158, 11, 0.1)",
+                border: "1px solid rgba(245, 158, 11, 0.25)",
+                fontSize: 12,
+                color: "var(--mx-text-secondary)",
+                lineHeight: 1.4,
+              }}>
+                <strong style={{ color: "var(--mx-text)" }}>💳 Paid Model Active:</strong> This model calls DeepSeek API directly using your <code>DEEPSEEK_API_KEY</code> in fast non-thinking mode. It is only used when explicitly selected here.
+              </div>
+            )}
 
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -300,7 +362,7 @@ export function SettingsForm() {
                 onChange={(e) => updatePref("thinking_mode", e.target.checked)}
               />
               <p style={{ margin: "4px 0 0 24px", fontSize: 12, color: "var(--mx-text-secondary)", lineHeight: 1.4 }}>
-                When disabled (recommended), the model provides fast, direct results. When enabled, models with reasoning capability will perform deeper multi-step reasoning.
+                When disabled (recommended), models run in fast non-thinking mode. When enabled, models with reasoning support will perform deeper multi-step reasoning.
               </p>
             </div>
           </Section>

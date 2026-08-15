@@ -78,9 +78,16 @@ REQUEST_LOG: dict[str, deque[datetime]] = defaultdict(deque)
 RATE_LIMIT = 30
 RATE_WINDOW = timedelta(minutes=1)
 
-# LLM: OpenCode Zen (free) or Direct DeepSeek (fallback)
-# Get a Zen key: https://opencode.ai/zen
+# LLM Providers:
+# 1. OpenCode Zen (Free Tier): https://opencode.ai/zen
+# 2. Groq Cloud (Free Tier): https://console.groq.com
+# 3. Direct DeepSeek (Official API): https://platform.deepseek.com
+ZEN_API_URL = "https://opencode.ai/zen/v1/chat/completions"
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+
 ZEN_API_KEY = os.getenv("ZEN_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json" if SUPABASE_URL else ""
@@ -90,19 +97,41 @@ TELEMETRY_LOGGER = logging.getLogger("mailx.telemetry")
 if TELEMETRY_ENABLED:
     TELEMETRY_LOGGER.setLevel(logging.INFO)
 TELEMETRY_INTENTS = frozenset(("summarize", "reply", "priority", "tasks", "draft", "spam", "phishing", "chat"))
+GROQ_MODELS = frozenset(("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile", "gemma2-9b-it"))
+DEEPSEEK_DIRECT_MODELS = frozenset(("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"))
 
-if ZEN_API_KEY:
-    LLM_API_URL = "https://opencode.ai/zen/v1/chat/completions"
-    LLM_MODEL = os.getenv("ZEN_MODEL", "hy3-free")
-    LLM_API_KEY = ZEN_API_KEY
-elif DEEPSEEK_API_KEY:
-    LLM_API_URL = "https://api.deepseek.com/v1/chat/completions"
-    LLM_MODEL = "deepseek-chat"
-    LLM_API_KEY = DEEPSEEK_API_KEY
-else:
-    LLM_API_URL = ""
-    LLM_MODEL = ""
-    LLM_API_KEY = ""
+LLM_API_URL = ZEN_API_URL if ZEN_API_KEY else (GROQ_API_URL if GROQ_API_KEY else (DEEPSEEK_API_URL if DEEPSEEK_API_KEY else ""))
+LLM_MODEL = os.getenv("ZEN_MODEL", "hy3-free") if ZEN_API_KEY else ("llama-3.3-70b-versatile" if GROQ_API_KEY else ("deepseek-v4-flash" if DEEPSEEK_API_KEY else ""))
+LLM_API_KEY = ZEN_API_KEY or GROQ_API_KEY or DEEPSEEK_API_KEY or ""
+
+
+def resolve_provider_for_model(model_name: str | None) -> tuple[str, str, str, str]:
+    """
+    Returns (provider_name, target_url, api_key, resolved_model).
+    Explicitly separates free OpenCode Zen models, free Groq models, and paid Official DeepSeek models.
+    """
+    target = (model_name or "").strip()
+    if not target:
+        target = LLM_MODEL or os.getenv("ZEN_MODEL", "hy3-free")
+
+    # If tests or environment specifically patched LLM_API_URL to a custom mock server, respect it
+    if LLM_API_URL and LLM_API_URL not in (ZEN_API_URL, GROQ_API_URL, DEEPSEEK_API_URL, "https://api.deepseek.com/v1/chat/completions"):
+        return "custom", LLM_API_URL, LLM_API_KEY, target
+
+    if target in GROQ_MODELS or "llama" in target.lower() or "gemma" in target.lower():
+        # Groq Cloud Provider (Free Tier)
+        key = GROQ_API_KEY or (LLM_API_KEY if not ZEN_API_KEY and not DEEPSEEK_API_KEY else "")
+        return "groq", GROQ_API_URL, key, target
+
+    if target in DEEPSEEK_DIRECT_MODELS or (target.startswith("deepseek-") and not target.endswith("-free")):
+        # Explicit official DeepSeek model (Paid Direct API)
+        key = DEEPSEEK_API_KEY or (LLM_API_KEY if not ZEN_API_KEY and not GROQ_API_KEY else "")
+        return "deepseek", DEEPSEEK_API_URL, key, target
+
+    # Default: Free OpenCode Zen model
+    key = ZEN_API_KEY or (LLM_API_KEY if not DEEPSEEK_API_KEY and not GROQ_API_KEY else "")
+    return "zen", ZEN_API_URL, key, target
+
 
 
 class StrictModel(BaseModel):
@@ -1051,9 +1080,26 @@ async def chat(
             telemetry=telemetry,
         )
 
-    if not LLM_API_KEY:
+    requested_model = req.model or (req.preferences.ai_model if req.preferences and req.preferences.ai_model else None)
+    provider_name, target_url, provider_key, active_model = resolve_provider_for_model(requested_model)
+    response_model = active_model
+
+    if not provider_key:
         log_backend_telemetry("request_finished", telemetry_snapshot(), "error")
-        raise HTTPException(status_code=500, detail="No API key configured. Set ZEN_API_KEY or DEEPSEEK_API_KEY in .env")
+        if provider_name == "groq":
+            raise HTTPException(
+                status_code=500,
+                detail="GROQ_API_KEY is not configured in backend/.env. Please configure your Groq key or switch model in Settings.",
+            )
+        if provider_name == "deepseek":
+            raise HTTPException(
+                status_code=500,
+                detail="DEEPSEEK_API_KEY is not configured in backend/.env. Please configure your key or switch to a free model in Settings.",
+            )
+        raise HTTPException(
+            status_code=500,
+            detail="No API key configured. Set ZEN_API_KEY, GROQ_API_KEY, or DEEPSEEK_API_KEY in backend/.env.",
+        )
 
     system_content = build_prompt(req.intent, context, req.preferences, req.prompt)
     untrusted_content = build_untrusted_content(req.intent, context, req.prompt)
@@ -1068,10 +1114,6 @@ async def chat(
         messages = [{"role": "system", "content": system_content}, {"role": "user", "content": untrusted_content}]
     input_characters = 0
 
-    requested_model = req.model or (req.preferences.ai_model if req.preferences and req.preferences.ai_model else None)
-    active_model = requested_model.strip() if requested_model and requested_model.strip() else (LLM_MODEL or "hy3-free")
-    response_model = active_model
-
     thinking_mode = req.thinking_mode if req.thinking_mode is not None else (req.preferences.thinking_mode if req.preferences and req.preferences.thinking_mode is not None else False)
 
     pref_summary_len = req.preferences.summary_length if req.preferences and req.preferences.summary_length else "medium"
@@ -1084,7 +1126,7 @@ async def chat(
     }
     if thinking_mode:
         request_payload["thinking"] = {"type": "enabled"}
-    elif "deepseek" in active_model.lower():
+    elif provider_name in ("zen", "deepseek"):
         request_payload["thinking"] = {"type": "disabled"}
 
     if req.intent in STRUCTURED_INTENTS:
@@ -1107,9 +1149,9 @@ async def chat(
             try:
                 response = await asyncio.wait_for(
                     client.post(
-                        LLM_API_URL,
+                        target_url,
                         headers={
-                            "Authorization": f"Bearer {LLM_API_KEY}",
+                            "Authorization": f"Bearer {provider_key}",
                             "Content-Type": "application/json",
                         },
                         json=payload,
@@ -1233,30 +1275,47 @@ async def check_model_status(
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
     target_model = model.strip() or LLM_MODEL or "hy3-free"
-    if not LLM_API_KEY or not LLM_API_URL:
+    provider_name, target_url, provider_key, resolved_model = resolve_provider_for_model(target_model)
+
+    if not provider_key or not target_url:
+        if provider_name == "groq":
+            return ModelStatusResponse(
+                model=resolved_model,
+                status="error",
+                latency_ms=0.0,
+                message="GROQ_API_KEY is not configured in backend/.env.",
+            )
+        if provider_name == "deepseek":
+            return ModelStatusResponse(
+                model=resolved_model,
+                status="error",
+                latency_ms=0.0,
+                message="DEEPSEEK_API_KEY is not configured in backend/.env.",
+            )
         return ModelStatusResponse(
-            model=target_model,
+            model=resolved_model,
             status="error",
             latency_ms=0.0,
-            message="LLM provider is not configured.",
+            message="ZEN_API_KEY is not configured in backend/.env.",
         )
 
     t0 = time.perf_counter()
     headers = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
+        "Authorization": f"Bearer {provider_key}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "model": target_model,
+    payload: dict = {
+        "model": resolved_model,
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 1,
-        "thinking": {"type": "disabled"},
     }
+    if provider_name in ("zen", "deepseek"):
+        payload["thinking"] = {"type": "disabled"}
 
     try:
         async with provider_client_context() as client:
             resp = await client.post(
-                LLM_API_URL,
+                target_url,
                 headers=headers,
                 json=payload,
                 timeout=10.0,
@@ -1264,20 +1323,21 @@ async def check_model_status(
             latency_ms = round((time.perf_counter() - t0) * 1000, 1)
 
             if resp.status_code == 200:
+                provider_desc = "Groq Cloud" if provider_name == "groq" else ("Official DeepSeek" if provider_name == "deepseek" else "OpenCode Zen")
                 return ModelStatusResponse(
-                    model=target_model,
+                    model=resolved_model,
                     status="available",
                     latency_ms=latency_ms,
-                    message=f"Model is active and available ({latency_ms}ms).",
+                    message=f"{resolved_model} is active and available via {provider_desc} ({latency_ms}ms).",
                 )
             if resp.status_code == 429:
                 return ModelStatusResponse(
-                    model=target_model,
+                    model=resolved_model,
                     status="rate_limited",
                     latency_ms=latency_ms,
-                    message="Free usage limit / rate limit reached for this model.",
+                    message="Usage limit / rate limit reached for this model.",
                 )
-            if resp.status_code in (400, 401, 404):
+            if resp.status_code in (400, 401, 403, 404):
                 error_msg = "Model is not supported or key is unauthorized."
                 try:
                     err_json = resp.json()
@@ -1286,13 +1346,13 @@ async def check_model_status(
                 except Exception:
                     pass
                 return ModelStatusResponse(
-                    model=target_model,
+                    model=resolved_model,
                     status="unsupported",
                     latency_ms=latency_ms,
                     message=error_msg,
                 )
             return ModelStatusResponse(
-                model=target_model,
+                model=resolved_model,
                 status="error",
                 latency_ms=latency_ms,
                 message=f"Provider returned HTTP {resp.status_code}.",
@@ -1300,7 +1360,7 @@ async def check_model_status(
     except httpx.TimeoutException:
         latency_ms = round((time.perf_counter() - t0) * 1000, 1)
         return ModelStatusResponse(
-            model=target_model,
+            model=resolved_model,
             status="error",
             latency_ms=latency_ms,
             message="Model probe timed out (>10s).",
@@ -1308,7 +1368,7 @@ async def check_model_status(
     except Exception as exc:
         latency_ms = round((time.perf_counter() - t0) * 1000, 1)
         return ModelStatusResponse(
-            model=target_model,
+            model=resolved_model,
             status="error",
             latency_ms=latency_ms,
             message=f"Health probe error: {exc}",
