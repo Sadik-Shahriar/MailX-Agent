@@ -1,19 +1,19 @@
 import React from 'react';
 import { Navbar } from './components/Navbar';
 import { Hero } from './components/Hero';
-import { InteractiveDemo } from './components/InteractiveDemo';
-import { InstallationGuide } from './components/InstallationGuide';
 import { FeaturesGrid } from './components/FeaturesGrid';
+import { ArchitectureSection } from './components/ArchitectureSection';
+import { InstallationGuide } from './components/InstallationGuide';
 import { SecurityPrivacy } from './components/SecurityPrivacy';
 import { TeamSection } from './components/TeamSection';
 import { Footer } from './components/Footer';
 
 export function App() {
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Dynamic atmospheric background */}
-      <div className="bg-atmosphere" />
-      <div className="bg-grid" />
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      {/* Subtle non-slop structural backgrounds */}
+      <div className="bg-grid-substrate" />
+      <div className="bg-accent-ambient" />
 
       {/* Navigation Header */}
       <Navbar />
@@ -21,9 +21,9 @@ export function App() {
       {/* Main Content Sections */}
       <main style={{ flex: 1 }}>
         <Hero />
-        <InteractiveDemo />
-        <InstallationGuide />
         <FeaturesGrid />
+        <ArchitectureSection />
+        <InstallationGuide />
         <SecurityPrivacy />
         <TeamSection />
       </main>
