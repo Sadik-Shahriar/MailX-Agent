@@ -266,8 +266,9 @@ async function handleMessage(msg: ExtensionMessage): Promise<any> {
 function parseTasks(result: Extract<StructuredAiResult, { kind: "tasks" }>, context: NonNullable<ExtensionMessage["email_context"]>): Omit<Task, "id" | "status" | "created_at">[] {
   return result.tasks.map((task) => ({
     email_id: context.id, email_subject: context.subject, email_sender: context.sender,
-    description: task.description, assignee: task.assignee,
-    due_date: task.due_date, priority: task.priority,
+    description: task.description, assignee: task.assignee?.trim() || "me",
+    due_date: task.due_date ?? null,
+    priority: (task.priority === "high" || task.priority === "low") ? task.priority : "medium",
   }));
 }
 

@@ -73,7 +73,7 @@ export function ResultView({ host, action, result, pending, onBack, onCancel, on
     if (responseState.state !== "success") return "";
     if (responseState.response.result?.kind === "tasks") {
       return responseState.response.result.tasks.map((task) =>
-        `${task.description}\n${task.assignee}${task.due_date ? `, due ${task.due_date}` : ""} (${task.priority})`
+        `${task.description}\n${task.assignee?.trim() || "me"}${task.due_date ? `, due ${task.due_date}` : ""} (${task.priority || "medium"})`
       ).join("\n\n");
     }
     return responseText(responseState.response);
@@ -322,8 +322,9 @@ export function ResultView({ host, action, result, pending, onBack, onCancel, on
                   Actionable Tasks ({responseState.response.result.tasks.length})
                 </div>
                 {responseState.response.result.tasks.map((task, index) => {
-                  const badgeBg = task.priority === "high" ? "var(--mx-danger-soft)" : task.priority === "medium" ? "var(--mx-warning-soft)" : "var(--mx-success-soft)";
-                  const badgeColor = task.priority === "high" ? "var(--mx-danger)" : task.priority === "medium" ? "var(--mx-warning)" : "var(--mx-success)";
+                  const priority = (task.priority === "high" || task.priority === "low") ? task.priority : "medium";
+                  const badgeBg = priority === "high" ? "var(--mx-danger-soft)" : priority === "medium" ? "var(--mx-warning-soft)" : "var(--mx-success-soft)";
+                  const badgeColor = priority === "high" ? "var(--mx-danger)" : priority === "medium" ? "var(--mx-warning)" : "var(--mx-success)";
                   return (
                     <div
                       key={`${task.description}-${index}`}
@@ -351,11 +352,11 @@ export function ResultView({ host, action, result, pending, onBack, onCancel, on
                           color: badgeColor,
                           whiteSpace: "nowrap",
                         }}>
-                          {task.priority}
+                          {priority}
                         </span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: "var(--mx-type-xs)", color: "var(--mx-text-secondary)" }}>
-                        <span>👤 {task.assignee}</span>
+                        <span>👤 {task.assignee?.trim() || "me"}</span>
                         {task.due_date && <span>📅 Due {task.due_date}</span>}
                       </div>
                     </div>

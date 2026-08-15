@@ -88,8 +88,11 @@ class MailXPromptTests(unittest.TestCase):
         priority_embedded = validate_structured_result("priority", 'Here is the result: {"priority":"high","category":"fyi","confidence":0.5}')
         self.assertEqual(priority_embedded.priority, "high")
 
-        tasks = validate_structured_result("tasks", '{"tasks":[{"description":"Send report","assignee":"me","due_date":"2026-07-18","priority":"high"}]}')
+        tasks = validate_structured_result("tasks", '{"tasks":[{"description":"Send report","assignee":"me","due_date":"2026-07-18","priority":"high"},{"description":"Update licenses","assignee":null,"due_date":null,"priority":"medium"}]}')
         self.assertEqual(str(tasks.tasks[0].due_date), "2026-07-18")
+        self.assertIsNone(tasks.tasks[1].assignee)
+        self.assertIsNone(tasks.tasks[1].due_date)
+        self.assertEqual(tasks.tasks[1].priority, "medium")
 
         for invalid in (
             'not-json-content',

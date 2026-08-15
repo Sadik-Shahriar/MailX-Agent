@@ -17,11 +17,13 @@ function isStructuredResult(value: unknown): value is StructuredAiResult {
       return typeof value.priority === "string" && typeof value.category === "string" && typeof value.confidence === "number";
     case "tasks":
       return Array.isArray(value.tasks) && value.tasks.every((task) =>
-        isRecord(task) && typeof task.description === "string" && typeof task.assignee === "string" &&
-        (typeof task.due_date === "string" || task.due_date === null) && typeof task.priority === "string",
+        isRecord(task) && typeof task.description === "string" &&
+        (typeof task.assignee === "string" || task.assignee === null || task.assignee === undefined) &&
+        (typeof task.due_date === "string" || task.due_date === null || task.due_date === undefined) &&
+        (typeof task.priority === "string" || task.priority === undefined),
       );
     case "draft":
-      return (typeof value.to === "string" || value.to === null) && typeof value.subject === "string" &&
+      return (typeof value.to === "string" || value.to === null || value.to === undefined) && typeof value.subject === "string" &&
         typeof value.greeting === "string" && typeof value.body === "string" && typeof value.sign_off === "string";
     case "spam":
       return typeof value.verdict === "string" && typeof value.confidence === "number" && typeof value.reason === "string" &&

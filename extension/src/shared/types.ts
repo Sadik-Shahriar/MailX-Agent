@@ -97,7 +97,7 @@ export interface ChatRequest {
 
 export type StructuredAiResult =
   | { kind: "priority"; priority: "high" | "medium" | "low"; category: "action_required" | "fyi" | "scheduling" | "newsletter"; confidence: number }
-  | { kind: "tasks"; tasks: Array<{ description: string; assignee: string; due_date: string | null; priority: "high" | "medium" | "low" }> }
+  | { kind: "tasks"; tasks: Array<{ description: string; assignee?: string | null; due_date?: string | null; priority?: "high" | "medium" | "low" | string }> }
   | { kind: "draft"; to: string | null; subject: string; greeting: string; body: string; sign_off: string }
   | { kind: "spam"; verdict: "spam" | "not_spam"; confidence: number; reason: string; category: "bulk" | "impersonation" | "newsletter" | "normal" | "transactional" }
   | { kind: "phishing"; verdict: "clean" | "suspicious" | "phishing"; confidence: number; reason: string };

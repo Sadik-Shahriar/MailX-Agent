@@ -78,6 +78,28 @@ describe("Assistant ChatResponse boundary", () => {
     expect(screen.queryByRole("button", { name: "Insert in Gmail" })).toBeNull();
   });
 
+  test("renders tasks with null or missing assignee and due date without error", () => {
+    renderWithToast(<ResultView host={hostWith()} action="extract" result={response({
+      intent: "tasks",
+      response: "Four tasks found.",
+      result: {
+        kind: "tasks",
+        tasks: [
+          { description: "Submit final documentation", assignee: "Sadik", due_date: "2026-08-17", priority: "high" },
+          { description: "Review and merge PRs", assignee: null, due_date: "2026-08-20", priority: "high" },
+          { description: "Prepare product demo deck", assignee: "Alex", due_date: "2026-08-22", priority: "high" },
+          { description: "Update project dependency licenses", assignee: null, due_date: null, priority: "medium" },
+        ],
+      },
+    })} pending={false} onBack={vi.fn()} />);
+
+    expect(screen.getByText("Submit final documentation")).not.toBeNull();
+    expect(screen.getByText("Review and merge PRs")).not.toBeNull();
+    expect(screen.getByText("Prepare product demo deck")).not.toBeNull();
+    expect(screen.getByText("Update project dependency licenses")).not.toBeNull();
+    expect(screen.queryByText(/unexpected response/i)).toBeNull();
+  });
+
   test("renders structured draft fields separately", () => {
     const host = hostWith(response({
       intent: "draft",
