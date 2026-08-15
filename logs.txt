@@ -1,9 +1,0 @@
-CRXJS DEV MODE
-Connecting to the Vite dev server…
-
-Cannot connect to http://localhost:5174/src/popup/index.html. Make sure Vite is running, then reload the extension.
-
-This page will close automatically after the extension reloads.
-
-Reload Extension
-Tip: if the URL is wrong, restart Vite so it picks the right port.
