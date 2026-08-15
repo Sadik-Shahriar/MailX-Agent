@@ -93,7 +93,7 @@ export function AssistantView({ host, emailContext, externalAction, onExternalAc
     onSecurityHandled?.();
   }, [securityResult, onSecurityHandled]);
 
-  const handleAction = (action: string, overrideContext?: any) => {
+  const handleAction = (action: string, overrideContext?: any, customPrompt?: string) => {
     const activeContext = overrideContext || context;
     if (!activeContext && action !== "draft" && action !== "ask") {
       // should not happen, buttons are disabled
@@ -126,7 +126,7 @@ export function AssistantView({ host, emailContext, externalAction, onExternalAc
     const requestVersion = requestVersionRef.current + 1;
     requestVersionRef.current = requestVersion;
     const req = host.sendAiMessage(
-      { type: messageType as any, email_context: activeContext! } as ExtensionMessage,
+      { type: messageType as any, email_context: activeContext!, prompt: customPrompt } as ExtensionMessage,
       "explicit",
       "action_panel",
       (res) => {
@@ -156,6 +156,9 @@ export function AssistantView({ host, emailContext, externalAction, onExternalAc
         cancelResultRequest();
         setChatInitialPrompt(question);
         setActiveView("chat");
+      }}
+      onPromptReply={(prompt) => {
+        handleAction("reply", undefined, prompt);
       }}
     />;
   }

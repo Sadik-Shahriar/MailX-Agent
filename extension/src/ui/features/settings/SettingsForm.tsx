@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useContext } from "react";
 import { Stack, Section } from "../../components/Layout";
 import { Button } from "../../components/Button";
-import { SelectField, NumberField, CheckboxField, TextareaField } from "../../components/Fields";
+import { SelectField, NumberField, CheckboxField, TextareaField, TextField } from "../../components/Fields";
 import { InlineAlert, ToastContext } from "../../components/Feedback";
 import { sendMessage } from "../../runtime/sendMessage";
 import type { ModelStatusResponse, UserPreferences } from "../../../shared/types";
@@ -51,7 +51,7 @@ export function SettingsForm() {
     setModelCheckError("");
     setModelStatus(null);
     try {
-      const selectedModel = prefs.ai_model || "hy3-free";
+      const selectedModel = prefs.ai_model || "llama-3.1-8b-instant";
       const status: ModelStatusResponse = await sendMessage({
         type: "CHECK_MODEL_STATUS",
         model: selectedModel,
@@ -111,6 +111,10 @@ export function SettingsForm() {
 
   function formatModelLabel(modelId?: string): string {
     switch (modelId) {
+      case "llama-3.1-8b-instant":
+        return "Llama 3.1 8B (Groq Free)";
+      case "llama-3.3-70b-versatile":
+        return "Llama 3.3 70B (Groq Free)";
       case "hy3-free":
         return "HY3 (Free)";
       case "deepseek-v4-flash-free":
@@ -121,14 +125,10 @@ export function SettingsForm() {
         return "Nemotron 3.5 Lightning (Free)";
       case "mimo-v2.5-free":
         return "MiMo v2.5 (Free)";
-      case "llama-3.3-70b-versatile":
-        return "Llama 3.3 70B (Groq Free)";
-      case "llama-3.1-8b-instant":
-        return "Llama 3.1 8B (Groq Free)";
       case "deepseek-v4-flash":
         return "DeepSeek v4 Flash (Paid API)";
       default:
-        return modelId || "HY3 (Free)";
+        return modelId || "Llama 3.1 8B (Free)";
     }
   }
 
@@ -274,43 +274,28 @@ export function SettingsForm() {
             <h2 style={{ fontSize: 13, margin: "0 0 12px 0", color: "var(--mx-text)" }}>AI Engine & Models</h2>
             <SelectField
               label="Active AI Model"
-              value={prefs.ai_model || "hy3-free"}
+              value={prefs.ai_model || "llama-3.1-8b-instant"}
               onChange={(e) => {
                 updatePref("ai_model", e.target.value);
                 setModelStatus(null);
                 setModelCheckError("");
               }}
             >
+              <optgroup label="Free Tier (Groq Cloud API - Fast LPU)">
+                <option value="llama-3.1-8b-instant">⚡ Llama 3.1 8B Instant (Recommended Default - Fast & Free)</option>
+                <option value="llama-3.3-70b-versatile">Meta Llama 3.3 70B Versatile (Free - Groq)</option>
+              </optgroup>
               <optgroup label="Free Tier (OpenCode Zen API)">
-                <option value="hy3-free">⚡ HY3 (Recommended, Fast & Free)</option>
+                <option value="hy3-free">HY3 (Free - Zen)</option>
                 <option value="deepseek-v4-flash-free">DeepSeek v4 Flash (Free - Zen)</option>
-                <option value="nemotron-3-ultra-free">⚡ NVIDIA Nemotron 3 Ultra (Free)</option>
+                <option value="nemotron-3-ultra-free">NVIDIA Nemotron 3 Ultra (Free)</option>
                 <option value="nemotron-3.5-lightning-free">NVIDIA Nemotron 3.5 Lightning (Free)</option>
                 <option value="mimo-v2.5-free">MiMo v2.5 (Free)</option>
-              </optgroup>
-              <optgroup label="Free Tier (Groq Cloud API - Fast LPU)">
-                <option value="llama-3.3-70b-versatile">⚡ Llama 3.3 70B Versatile (Free - Groq)</option>
-                <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant (Free - Groq)</option>
               </optgroup>
               <optgroup label="DeepSeek Direct API (Paid)">
                 <option value="deepseek-v4-flash">DeepSeek v4 Flash (Paid API - Fast Non-Thinking)</option>
               </optgroup>
             </SelectField>
-
-            {(prefs.ai_model === "llama-3.3-70b-versatile" || prefs.ai_model === "llama-3.1-8b-instant") && (
-              <div style={{
-                marginTop: 8,
-                padding: "8px 12px",
-                borderRadius: "var(--mx-radius-sm)",
-                background: "rgba(16, 185, 129, 0.1)",
-                border: "1px solid rgba(16, 185, 129, 0.25)",
-                fontSize: 12,
-                color: "var(--mx-text-secondary)",
-                lineHeight: 1.4,
-              }}>
-                <strong style={{ color: "var(--mx-text)" }}>⚡ Groq Free Tier Active:</strong> High-speed LPU inference. Requires <code>GROQ_API_KEY</code> configured in <code>backend/.env</code>.
-              </div>
-            )}
 
             {prefs.ai_model === "deepseek-v4-flash" && (
               <div style={{
@@ -436,6 +421,16 @@ export function SettingsForm() {
               <option value="casual">Casual</option>
               <option value="formal">Formal</option>
             </SelectField>
+
+            <div style={{ marginTop: 12 }}>
+              <TextField
+                label="Your Name (for Sign-Offs)"
+                helperText="Auto-detected from Google account. Used for closing signature (e.g. 'Best regards, Sadik')."
+                placeholder="e.g. Sadik Shahriar"
+                value={prefs.user_name || ""}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => updatePref("user_name", e.target.value)}
+              />
+            </div>
 
             <div style={{ marginTop: 12 }}>
               <SelectField

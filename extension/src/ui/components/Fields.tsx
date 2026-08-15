@@ -51,6 +51,19 @@ export const NumberField = ({ label, helperText, error, className = '', ...props
   </Field>
 );
 
+export interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  helperText?: ReactNode;
+  error?: string;
+}
+export const TextField = ({ label, helperText, error, className = '', ...props }: TextFieldProps) => (
+  <Field label={label} helperText={helperText} error={error} className={className}>
+    {(id, describedBy) => (
+      <input type="text" id={id} className="mx-input" aria-describedby={describedBy} aria-invalid={!!error} {...props} />
+    )}
+  </Field>
+);
+
 export interface TextareaFieldProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   label: string;
   helperText?: ReactNode;

@@ -15,6 +15,7 @@ export interface ResultViewProps {
   onBack: () => void;
   onCancel?: () => void;
   onAskQuestion?: (question: string) => void;
+  onPromptReply?: (prompt: string) => void;
 }
 
 export function parseSummaryBullets(text: string): string[] {
@@ -38,10 +39,11 @@ export function parseSummaryBullets(text: string): string[] {
   return rawBullets.length > 0 ? rawBullets : [text.trim()];
 }
 
-export function ResultView({ host, action, result, pending, onBack, onCancel, onAskQuestion }: ResultViewProps) {
+export function ResultView({ host, action, result, pending, onBack, onCancel, onAskQuestion, onPromptReply }: ResultViewProps) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [insertPending, setInsertPending] = useState(false);
   const [followUpInput, setFollowUpInput] = useState("");
+  const [replyPromptInput, setReplyPromptInput] = useState("");
   const { showToast } = useToast();
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -142,7 +144,9 @@ export function ResultView({ host, action, result, pending, onBack, onCancel, on
         {pending ? (
           <div role="status" aria-live="polite" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 160, color: "var(--mx-text-secondary)", gap: 14 }}>
             <Spinner />
-            <span style={{ fontSize: "var(--mx-type-sm)", fontWeight: 500 }}>{action === "summarize" ? "Analyzing email and creating summary..." : "Generating..."}</span>
+            <span style={{ fontSize: "var(--mx-type-sm)", fontWeight: 500 }}>
+              {action === "summarize" ? "Analyzing email and creating summary..." : action === "reply" ? "Generating tailored reply..." : "Generating..."}
+            </span>
             <Button variant="secondary" onClick={onCancel || onBack}>Cancel</Button>
           </div>
         ) : responseState.state === "error" ? (
@@ -356,7 +360,7 @@ export function ResultView({ host, action, result, pending, onBack, onCancel, on
                         </span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: "var(--mx-type-xs)", color: "var(--mx-text-secondary)" }}>
-                        <span>👤 {task.assignee?.trim() || "me"}</span>
+                        {task.assignee && <span>👤 {task.assignee}</span>}
                         {task.due_date && <span>📅 Due {task.due_date}</span>}
                       </div>
                     </div>
@@ -385,7 +389,7 @@ export function ResultView({ host, action, result, pending, onBack, onCancel, on
           </div>
         ) : responseState.state === "success" && action === "reply" ? (
           /* Enhanced Suggested Reply View */
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{
               display: "flex",
               alignItems: "center",
@@ -412,6 +416,96 @@ export function ResultView({ host, action, result, pending, onBack, onCancel, on
             }}>
               {parseReplyOptions(rawText)[0] || rawText}
             </div>
+
+            {/* Interactive Prompt / Refine Reply Section */}
+            {onPromptReply && (
+              <div style={{
+                marginTop: 4,
+                padding: "12px 14px",
+                background: "var(--mx-surface-subtle)",
+                borderRadius: "var(--mx-radius-md)",
+                border: "1px solid var(--mx-divider)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                  <span style={{ fontSize: "var(--mx-type-xs)", fontWeight: 700, color: "var(--mx-text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    Prompt / Refine Reply
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {[
+                    "Make it shorter",
+                    "Make it longer",
+                    "More formal",
+                    "More casual",
+                    "Polite decline",
+                    "Accept warmly",
+                  ].map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => onPromptReply(suggestion)}
+                      style={{
+                        padding: "4px 9px",
+                        fontSize: "var(--mx-type-xs)",
+                        fontWeight: 500,
+                        color: "var(--mx-primary)",
+                        background: "var(--mx-surface)",
+                        border: "1px solid var(--mx-divider)",
+                        borderRadius: "var(--mx-radius-pill)",
+                        cursor: "pointer",
+                        transition: "all var(--mx-duration-fast) var(--mx-ease-out)",
+                      }}
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (replyPromptInput.trim()) {
+                      onPromptReply(replyPromptInput.trim());
+                      setReplyPromptInput("");
+                    }
+                  }}
+                  style={{ display: "flex", gap: 6 }}
+                >
+                  <input
+                    type="text"
+                    value={replyPromptInput}
+                    onChange={(e) => setReplyPromptInput(e.target.value)}
+                    placeholder="Refine reply (e.g. make shorter, decline politely)..."
+                    style={{
+                      flex: 1,
+                      padding: "7px 10px",
+                      fontSize: "var(--mx-type-sm)",
+                      borderRadius: "var(--mx-radius-sm)",
+                      border: "1px solid var(--mx-control-border)",
+                      background: "var(--mx-surface)",
+                      color: "var(--mx-text)",
+                      outline: "none",
+                    }}
+                  />
+                  <Button
+                    variant="primary"
+                    type="submit"
+                    disabled={!replyPromptInput.trim()}
+                    style={{ padding: "0 14px", height: 32 }}
+                  >
+                    Prompt
+                  </Button>
+                </form>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ fontSize: "var(--mx-type-sm)", lineHeight: "var(--mx-lh-body)", color: "var(--mx-text)" }}>

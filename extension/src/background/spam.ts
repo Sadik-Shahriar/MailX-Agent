@@ -53,7 +53,7 @@ export async function checkSpam(
     spam_blacklist: preferences.spam_blacklist,
   });
   const result = await getOrSetCache(cacheKey, async () => {
-    const response = await chat({ intent: "spam", email_context: context, telemetry }, signal, accessToken);
+    const response = await chat({ intent: "spam", email_context: context, preferences, telemetry }, signal, accessToken);
     if (response.result?.kind !== "spam") throw new Error("Spam classifier returned an invalid result.");
     return { ...response.result, source: "llm" as const };
   }, 30 * 60 * 1000, (event) => {

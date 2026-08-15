@@ -100,9 +100,13 @@ TELEMETRY_INTENTS = frozenset(("summarize", "reply", "priority", "tasks", "draft
 GROQ_MODELS = frozenset(("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile", "gemma2-9b-it"))
 DEEPSEEK_DIRECT_MODELS = frozenset(("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"))
 
-LLM_API_URL = ZEN_API_URL if ZEN_API_KEY else (GROQ_API_URL if GROQ_API_KEY else (DEEPSEEK_API_URL if DEEPSEEK_API_KEY else ""))
-LLM_MODEL = os.getenv("ZEN_MODEL", "hy3-free") if ZEN_API_KEY else ("llama-3.3-70b-versatile" if GROQ_API_KEY else ("deepseek-v4-flash" if DEEPSEEK_API_KEY else ""))
-LLM_API_KEY = ZEN_API_KEY or GROQ_API_KEY or DEEPSEEK_API_KEY or ""
+LLM_API_URL = GROQ_API_URL if GROQ_API_KEY else (ZEN_API_URL if ZEN_API_KEY else (DEEPSEEK_API_URL if DEEPSEEK_API_KEY else ""))
+LLM_MODEL = (
+    os.getenv("GROQ_MODEL", "llama-3.1-8b-instant") if GROQ_API_KEY
+    else (os.getenv("ZEN_MODEL", "hy3-free") if ZEN_API_KEY
+    else ("deepseek-v4-flash" if DEEPSEEK_API_KEY else "llama-3.1-8b-instant"))
+)
+LLM_API_KEY = GROQ_API_KEY or ZEN_API_KEY or DEEPSEEK_API_KEY or ""
 
 
 def resolve_provider_for_model(model_name: str | None) -> tuple[str, str, str, str]:
@@ -112,7 +116,7 @@ def resolve_provider_for_model(model_name: str | None) -> tuple[str, str, str, s
     """
     target = (model_name or "").strip()
     if not target:
-        target = LLM_MODEL or os.getenv("ZEN_MODEL", "hy3-free")
+        target = LLM_MODEL or "llama-3.1-8b-instant"
 
     # If tests or environment specifically patched LLM_API_URL to a custom mock server, respect it
     if LLM_API_URL and LLM_API_URL not in (ZEN_API_URL, GROQ_API_URL, DEEPSEEK_API_URL, "https://api.deepseek.com/v1/chat/completions"):
@@ -196,6 +200,7 @@ class Preferences(BaseModel):
     custom_summary_instructions: str | None = Field(default=None, max_length=500)
     custom_draft_instructions: str | None = Field(default=None, max_length=500)
     custom_task_instructions: str | None = Field(default=None, max_length=500)
+    user_name: str | None = Field(default=None, max_length=150)
 
 
 class ChatMessage(StrictModel):
@@ -595,10 +600,10 @@ def has_summarizable_content(body: str) -> bool:
 
 SYSTEM_PROMPTS = {
     "summarize": "You are MailX email assistant. Directly summarize the email in {summary_length} factual bullet points. Each point starts with '• '. Output only bullet points without thinking, preamble, or field labels.",
-    "reply": "Draft a single short, helpful, professional {tone} email response from the recipient back to the sender. Output ONLY the email reply text without commentary, meta-analysis, or thinking process.",
+    "reply": "Draft a single helpful, professional {tone} email response from the recipient back to the sender following any user prompt or instructions provided. Sign off with the sender's actual name if known, and never output placeholder brackets like '[Your Name]'. Output ONLY the email reply text without commentary, meta-analysis, or thinking process.",
     "priority": "Classify the email priority. Output a valid JSON object: {{\"priority\":\"high\"|\"medium\"|\"low\",\"category\":\"action_required\"|\"fyi\"|\"scheduling\"|\"newsletter\",\"confidence\":0.0 to 1.0}}. Output ONLY the JSON object.",
     "tasks": "Extract all tasks and deadlines from the email into JSON: {{\"tasks\":[{{\"description\":\"...\",\"assignee\":\"...\" or null,\"due_date\":\"YYYY-MM-DD\" or null,\"priority\":\"high\"|\"medium\"|\"low\"}}]}}. If no tasks exist, return {{\"tasks\":[]}}. Output ONLY the raw JSON object without thinking, markdown, or explanation.",
-    "draft": "Write a {tone} email draft based on the user instructions. Output a valid JSON object: {{\"to\":\"...\" or null,\"subject\":\"...\",\"greeting\":\"...\",\"body\":\"...\",\"sign_off\":\"...\"}}. Output ONLY the JSON object.",
+    "draft": "Write a {tone} email draft based on the user instructions. Output a valid JSON object: {{\"to\":\"...\" or null,\"subject\":\"...\",\"greeting\":\"...\",\"body\":\"...\",\"sign_off\":\"...\"}}. In sign_off, use the sender's actual name if known and never output placeholder brackets like '[Your Name]'. Output ONLY the JSON object.",
     "spam": "Analyze whether the email is spam. Output a valid JSON object: {{\"verdict\":\"spam\"|\"not_spam\",\"confidence\":0.0 to 1.0,\"reason\":\"...\",\"category\":\"bulk\"|\"impersonation\"|\"newsletter\"|\"normal\"|\"transactional\"}}. Output ONLY the JSON object.",
     "phishing": "Analyze the URL security signals. Output a valid JSON object: {{\"verdict\":\"phishing\"|\"suspicious\"|\"clean\",\"confidence\":0.0 to 1.0,\"reason\":\"...\"}}. Output ONLY the JSON object.",
     "chat": "You are MailX, an intelligent AI email assistant. Answer the user question directly, clearly, and concisely based only on facts in the untrusted email. Do not output any internal thought process or reasoning chain.",
@@ -636,6 +641,10 @@ def build_prompt(intent: str, ctx: dict | None, prefs: dict | None,
     
     text = template.replace("{tone}", preferences.get("reply_tone", "professional")).replace("{today}", date.today().isoformat()).replace("{summary_length}", length_desc)
     
+    user_name = (preferences.get("user_name") or "").strip()
+    if user_name and intent in ("reply", "draft"):
+        text += f" The user/sender's name is '{user_name}'. In the sign-off / closing signature, always use '{user_name}' directly and never output placeholder brackets like '[Your Name]' or '[Name]'."
+
     if intent == "priority" and preferences.get("custom_priority_rules"):
         rules = bounded_excerpt(preferences["custom_priority_rules"], 300)
         text += f" User priority criteria to follow: {rules}."
@@ -889,7 +898,7 @@ def normalize_replies(content: str) -> str:
 STRUCTURED_INTENTS = frozenset(("priority", "tasks", "draft", "spam", "phishing"))
 
 
-def validate_structured_result(intent: str, content: str) -> StructuredResult:
+def validate_structured_result(intent: str, content: str, prefs: dict | Preferences | None = None) -> StructuredResult:
     try:
         value = extract_json_payload(content)
     except (json.JSONDecodeError, TypeError, ValueError) as error:
@@ -897,6 +906,9 @@ def validate_structured_result(intent: str, content: str) -> StructuredResult:
 
     if not isinstance(value, dict):
         raise ValueError("LLM provider returned non-object JSON")
+
+    preferences = model_values(prefs) if prefs else {}
+    user_name = (preferences.get("user_name") or "").strip()
 
     try:
         if intent == "priority":
@@ -952,6 +964,15 @@ def validate_structured_result(intent: str, content: str) -> StructuredResult:
                 greeting = "Hello,"
             if not sign_off:
                 sign_off = "Best regards,"
+
+            if user_name:
+                for ph in ("[Your Name]", "[your name]", "[Your name]", "[Name]", "[name]", "[Insert Your Name]", "[Insert Name]"):
+                    sign_off = sign_off.replace(ph, user_name)
+                    body = body.replace(ph, user_name)
+                if not any(user_name.lower() in sign_off.lower() for _ in [1]) and any(w in sign_off.lower() for w in ("regards", "sincerely", "best", "thanks")):
+                    if "\n" not in sign_off and not sign_off.endswith(user_name):
+                        sign_off = f"{sign_off}\n{user_name}"
+
             return DraftResult(
                 kind="draft",
                 to=to[:320] if to else None,
@@ -1238,7 +1259,7 @@ async def chat(
     structured_result: StructuredResult | None = None
     if req.intent in STRUCTURED_INTENTS:
         try:
-            structured_result = validate_structured_result(req.intent, content)
+            structured_result = validate_structured_result(req.intent, content, req.preferences)
         except ValueError as error:
             logging.error("[Structured Error] intent=%s raw_content=%r error=%s", req.intent, content, error)
             log_backend_telemetry("request_finished", telemetry_snapshot(), "error")
@@ -1254,6 +1275,15 @@ async def chat(
         content = clean_summary(content, pref_summary_len)
     elif req.intent == "reply":
         content = normalize_replies(content)
+        user_name = (req.preferences.user_name if req.preferences and req.preferences.user_name else "").strip()
+        if user_name:
+            for ph in ("[Your Name]", "[your name]", "[Your name]", "[Name]", "[name]", "[Insert Your Name]", "[Insert Name]"):
+                content = content.replace(ph, user_name)
+            if not any(user_name.lower() in content.lower() for _ in [1]):
+                for signoff_word in ("Best regards,", "Warm regards,", "Kind regards,", "Best,", "Sincerely,", "Thanks,"):
+                    if signoff_word in content and not content.rstrip().endswith(user_name):
+                        content = re.sub(rf"{re.escape(signoff_word)}\s*$", f"{signoff_word}\n{user_name}", content, flags=re.M)
+                        break
 
     telemetry = telemetry_snapshot()
     log_backend_telemetry("request_finished", telemetry, "success")
@@ -1274,7 +1304,7 @@ async def check_model_status(
     model: str = Query(default="", max_length=80),
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
-    target_model = model.strip() or LLM_MODEL or "hy3-free"
+    target_model = model.strip() or LLM_MODEL or "llama-3.1-8b-instant"
     provider_name, target_url, provider_key, resolved_model = resolve_provider_for_model(target_model)
 
     if not provider_key or not target_url:

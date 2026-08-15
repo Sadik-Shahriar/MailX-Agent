@@ -666,6 +666,46 @@ class MailXApiSecurityTests(unittest.TestCase):
         self.assertEqual(provider.payload["model"], "deepseek-v4-flash")
         self.assertEqual(provider.payload["thinking"], {"type": "disabled"})
 
+    def test_reply_injects_user_name_and_replaces_placeholders(self):
+        provider = StructuredContentClient(
+            "R1:\nThank you for reaching out.\n\nBest regards,\n[Your Name]"
+        )
+        main.app.dependency_overrides[main.require_authenticated_user] = lambda: main.AuthenticatedUser(id="user-1")
+        with (
+            patch.object(main.httpx, "AsyncClient", return_value=provider),
+            patch.object(main, "GROQ_API_KEY", "groq-test-key"),
+            patch.object(main, "LLM_API_URL", main.GROQ_API_URL),
+        ):
+            with TestClient(main.app) as client:
+                response = client.post("/chat", json={
+                    "intent": "reply",
+                    "email_context": {"body": "Could we schedule a call?"},
+                    "preferences": {"user_name": "Sadik Shahriar"},
+                })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Sadik Shahriar", response.json()["response"])
+        self.assertNotIn("[Your Name]", response.json()["response"])
+
+    def test_draft_injects_user_name_and_replaces_placeholders(self):
+        draft_json = '{"to":"alex@corp.com","subject":"Update","greeting":"Hi Alex,","body":"Here is the doc.","sign_off":"Best regards,\\n[Your Name]"}'
+        provider = StructuredContentClient(draft_json)
+        main.app.dependency_overrides[main.require_authenticated_user] = lambda: main.AuthenticatedUser(id="user-1")
+        with (
+            patch.object(main.httpx, "AsyncClient", return_value=provider),
+            patch.object(main, "GROQ_API_KEY", "groq-test-key"),
+            patch.object(main, "LLM_API_URL", main.GROQ_API_URL),
+        ):
+            with TestClient(main.app) as client:
+                response = client.post("/chat", json={
+                    "intent": "draft",
+                    "prompt": "Send update to Alex",
+                    "preferences": {"user_name": "Sadik Shahriar"},
+                })
+        self.assertEqual(response.status_code, 200)
+        result = response.json()["result"]
+        self.assertIn("Sadik Shahriar", result["sign_off"])
+        self.assertNotIn("[Your Name]", result["sign_off"])
+
 
 if __name__ == "__main__":
     unittest.main()

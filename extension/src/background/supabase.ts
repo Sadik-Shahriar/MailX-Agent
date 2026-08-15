@@ -99,7 +99,7 @@ const defaultPreferences: UserPreferences = {
   spam_blacklist: [],
   phishing_sensitivity: "default",
   phishing_allowlist: [],
-  ai_model: "hy3-free",
+  ai_model: "llama-3.1-8b-instant",
   thinking_mode: false,
   summary_length: "medium",
   custom_priority_rules: "",
@@ -107,15 +107,24 @@ const defaultPreferences: UserPreferences = {
   custom_summary_instructions: "",
   custom_draft_instructions: "",
   custom_task_instructions: "",
+  user_name: "",
 };
 
 const PREFERENCES_SELECT_COLUMNS = "reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist, ai_model, thinking_mode, summary_length, custom_priority_rules, custom_reply_instructions, custom_summary_instructions, custom_draft_instructions, custom_task_instructions";
 
 export async function getPreferences(): Promise<UserPreferences> {
-  const userId = await getUserId();
-  if (!userId) return { ...defaultPreferences };
+  const session = await getSession();
+  const metaName = (
+    session?.user?.user_metadata?.full_name ||
+    session?.user?.user_metadata?.name ||
+    session?.user?.user_metadata?.given_name ||
+    (session?.user?.email ? session.user.email.split("@")[0].replace(/[._+-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "")
+  );
+
+  const userId = session?.user?.id;
+  if (!userId) return { ...defaultPreferences, user_name: metaName };
   const cached = preferencesMemory.get(userId);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (cached && cached.expiresAt > Date.now()) return { ...cached.value, user_name: cached.value.user_name || metaName };
   const existing = preferencesInFlight.get(userId);
   if (existing) return existing;
   const request = (async () => {
@@ -123,6 +132,9 @@ export async function getPreferences(): Promise<UserPreferences> {
       .from("preferences").select(PREFERENCES_SELECT_COLUMNS).eq("user_id", userId).maybeSingle();
     if (error) throw error;
     const value = { ...defaultPreferences, ...data };
+    if (!value.user_name && metaName) {
+      value.user_name = metaName;
+    }
     preferencesMemory.set(userId, { value, expiresAt: Date.now() + PREFERENCES_TTL_MS });
     return value;
   })();
