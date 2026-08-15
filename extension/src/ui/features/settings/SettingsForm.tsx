@@ -425,8 +425,8 @@ export function SettingsForm() {
             <div style={{ marginTop: 12 }}>
               <TextField
                 label="Your Name (for Sign-Offs)"
-                helperText="Auto-detected from Google account. Used for closing signature (e.g. 'Best regards, Sadik')."
-                placeholder="e.g. Sadik Shahriar"
+                helperText="Auto-detected from Google account. Used for closing signature (e.g. 'Best regards, Alice')."
+                placeholder="e.g. Alice"
                 value={prefs.user_name || ""}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => updatePref("user_name", e.target.value)}
               />

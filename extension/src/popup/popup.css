@@ -1,20 +1,24 @@
 html,
 body,
 #root {
-  width: 400px;
-  min-width: 400px;
+  width: 580px;
+  min-width: 580px;
   margin: 0;
+  padding: 0;
 }
 
 body {
-  min-height: 520px;
+  height: 600px;
+  min-height: 600px;
   max-height: 600px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 #root {
-  min-height: 520px;
-  height: min(600px, 100vh);
+  height: 600px;
+  min-height: 600px;
+  max-height: 600px;
   background: var(--mx-bg);
 }
 
@@ -22,10 +26,11 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
-  min-height: 520px;
   height: 100%;
+  min-height: 600px;
   background: var(--mx-bg);
   color: var(--mx-text);
+  box-sizing: border-box;
 }
 
 .mx-popup-main {
@@ -33,9 +38,24 @@ body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--mx-divider) transparent;
 }
 
-@media (max-width: 399px) {
+.mx-popup-main::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mx-popup-main::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mx-popup-main::-webkit-scrollbar-thumb {
+  background: var(--mx-divider);
+  border-radius: 3px;
+}
+
+@media (max-width: 579px) {
   html,
   body,
   #root {

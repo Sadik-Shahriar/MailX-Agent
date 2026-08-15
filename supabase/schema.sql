@@ -28,7 +28,8 @@ alter table public.preferences
   add column if not exists custom_reply_instructions text default '',
   add column if not exists custom_summary_instructions text default '',
   add column if not exists custom_draft_instructions text default '',
-  add column if not exists custom_task_instructions text default '';
+  add column if not exists custom_task_instructions text default '',
+  add column if not exists user_name text default '';
 
 -- 2. Tasks (FR5)
 create table if not exists public.tasks (

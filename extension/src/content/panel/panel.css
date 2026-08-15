@@ -4,9 +4,9 @@
   bottom: 24px;
   z-index: 2147483646;
   box-sizing: border-box;
-  width: min(400px, calc(100vw - 24px));
-  min-height: 360px;
-  max-height: min(680px, calc(100dvh - 24px));
+  width: min(480px, calc(100vw - 32px));
+  min-height: 420px;
+  max-height: min(840px, calc(100dvh - 32px));
   display: flex;
   flex-direction: column;
   overflow: hidden;

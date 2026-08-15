@@ -110,7 +110,7 @@ const defaultPreferences: UserPreferences = {
   user_name: "",
 };
 
-const PREFERENCES_SELECT_COLUMNS = "reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist, ai_model, thinking_mode, summary_length, custom_priority_rules, custom_reply_instructions, custom_summary_instructions, custom_draft_instructions, custom_task_instructions";
+const PREFERENCES_SELECT_COLUMNS = "reply_tone, reminder_delay_days, reminder_notify_before, reminder_notify_due, reminder_notify_overdue, spam_whitelist, spam_blacklist, phishing_sensitivity, phishing_allowlist, ai_model, thinking_mode, summary_length, custom_priority_rules, custom_reply_instructions, custom_summary_instructions, custom_draft_instructions, custom_task_instructions, user_name";
 
 export async function getPreferences(): Promise<UserPreferences> {
   const session = await getSession();
