@@ -97,14 +97,21 @@ TELEMETRY_LOGGER = logging.getLogger("mailx.telemetry")
 if TELEMETRY_ENABLED:
     TELEMETRY_LOGGER.setLevel(logging.INFO)
 TELEMETRY_INTENTS = frozenset(("summarize", "reply", "priority", "tasks", "draft", "spam", "phishing", "chat"))
-GROQ_MODELS = frozenset(("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile", "gemma2-9b-it"))
+GROQ_MODELS = frozenset((
+    "allam-2-7b",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "groq/compound-mini",
+    "groq/compound",
+    "qwen/qwen3.6-27b",
+))
 DEEPSEEK_DIRECT_MODELS = frozenset(("deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"))
 
 LLM_API_URL = GROQ_API_URL if GROQ_API_KEY else (ZEN_API_URL if ZEN_API_KEY else (DEEPSEEK_API_URL if DEEPSEEK_API_KEY else ""))
 LLM_MODEL = (
-    os.getenv("GROQ_MODEL", "llama-3.1-8b-instant") if GROQ_API_KEY
+    os.getenv("GROQ_MODEL", "allam-2-7b") if GROQ_API_KEY
     else (os.getenv("ZEN_MODEL", "hy3-free") if ZEN_API_KEY
-    else ("deepseek-v4-flash" if DEEPSEEK_API_KEY else "llama-3.1-8b-instant"))
+    else ("deepseek-v4-flash" if DEEPSEEK_API_KEY else "allam-2-7b"))
 )
 LLM_API_KEY = GROQ_API_KEY or ZEN_API_KEY or DEEPSEEK_API_KEY or ""
 
@@ -116,13 +123,24 @@ def resolve_provider_for_model(model_name: str | None) -> tuple[str, str, str, s
     """
     target = (model_name or "").strip()
     if not target:
-        target = LLM_MODEL or "llama-3.1-8b-instant"
+        target = LLM_MODEL or "allam-2-7b"
 
     # If tests or environment specifically patched LLM_API_URL to a custom mock server, respect it
     if LLM_API_URL and LLM_API_URL not in (ZEN_API_URL, GROQ_API_URL, DEEPSEEK_API_URL, "https://api.deepseek.com/v1/chat/completions"):
         return "custom", LLM_API_URL, LLM_API_KEY, target
 
-    if target in GROQ_MODELS or "llama" in target.lower() or "gemma" in target.lower():
+    if (
+        target in GROQ_MODELS
+        or target.startswith("openai/gpt-oss")
+        or target.startswith("groq/")
+        or target.startswith("qwen/")
+        or target.startswith("meta-llama/")
+        or "allam" in target.lower()
+        or "gpt-oss" in target.lower()
+        or "compound" in target.lower()
+        or "llama" in target.lower()
+        or "gemma" in target.lower()
+    ):
         # Groq Cloud Provider (Free Tier)
         key = GROQ_API_KEY or (LLM_API_KEY if not ZEN_API_KEY and not DEEPSEEK_API_KEY else "")
         return "groq", GROQ_API_URL, key, target
@@ -1304,7 +1322,7 @@ async def check_model_status(
     model: str = Query(default="", max_length=80),
     user: AuthenticatedUser = Depends(require_authenticated_user),
 ):
-    target_model = model.strip() or LLM_MODEL or "llama-3.1-8b-instant"
+    target_model = model.strip() or LLM_MODEL or "allam-2-7b"
     provider_name, target_url, provider_key, resolved_model = resolve_provider_for_model(target_model)
 
     if not provider_key or not target_url:

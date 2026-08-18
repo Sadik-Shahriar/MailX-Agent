@@ -584,11 +584,17 @@ class MailXApiSecurityTests(unittest.TestCase):
             self.assertEqual(key_zen1, "zen-test-key")
             self.assertEqual(m_zen1, "hy3-free")
 
-            p_groq1, url_groq1, key_groq1, m_groq1 = main.resolve_provider_for_model("llama-3.3-70b-versatile")
+            p_groq1, url_groq1, key_groq1, m_groq1 = main.resolve_provider_for_model("allam-2-7b")
             self.assertEqual(p_groq1, "groq")
             self.assertEqual(url_groq1, main.GROQ_API_URL)
             self.assertEqual(key_groq1, "groq-test-key")
-            self.assertEqual(m_groq1, "llama-3.3-70b-versatile")
+            self.assertEqual(m_groq1, "allam-2-7b")
+
+            p_groq2, url_groq2, key_groq2, m_groq2 = main.resolve_provider_for_model("openai/gpt-oss-20b")
+            self.assertEqual(p_groq2, "groq")
+            self.assertEqual(url_groq2, main.GROQ_API_URL)
+            self.assertEqual(key_groq2, "groq-test-key")
+            self.assertEqual(m_groq2, "openai/gpt-oss-20b")
 
             p_ds1, url_ds1, key_ds1, m_ds1 = main.resolve_provider_for_model("deepseek-v4-flash")
             self.assertEqual(p_ds1, "deepseek")
@@ -607,7 +613,7 @@ class MailXApiSecurityTests(unittest.TestCase):
                 resp = client.post("/chat", json={
                     "intent": "summarize",
                     "email_context": {"body": "Project status is ready"},
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "allam-2-7b",
                 })
         self.assertEqual(resp.status_code, 500)
         self.assertIn("GROQ_API_KEY is not configured", resp.json()["detail"])
@@ -624,11 +630,11 @@ class MailXApiSecurityTests(unittest.TestCase):
                 response = client.post("/chat", json={
                     "intent": "summarize",
                     "email_context": {"body": "Project status is ready"},
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "allam-2-7b",
                     "thinking_mode": False,
                 })
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(provider.payload["model"], "llama-3.3-70b-versatile")
+        self.assertEqual(provider.payload["model"], "allam-2-7b")
         self.assertNotIn("thinking", provider.payload)
 
     def test_official_deepseek_model_without_key_raises_error(self):

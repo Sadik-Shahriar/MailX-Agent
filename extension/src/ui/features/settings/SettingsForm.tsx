@@ -51,7 +51,7 @@ export function SettingsForm() {
     setModelCheckError("");
     setModelStatus(null);
     try {
-      const selectedModel = prefs.ai_model || "llama-3.1-8b-instant";
+      const selectedModel = prefs.ai_model || "allam-2-7b";
       const status: ModelStatusResponse = await sendMessage({
         type: "CHECK_MODEL_STATUS",
         model: selectedModel,
@@ -111,10 +111,18 @@ export function SettingsForm() {
 
   function formatModelLabel(modelId?: string): string {
     switch (modelId) {
-      case "llama-3.1-8b-instant":
-        return "Llama 3.1 8B (Groq Free)";
-      case "llama-3.3-70b-versatile":
-        return "Llama 3.3 70B (Groq Free)";
+      case "allam-2-7b":
+        return "ALLaM 2.0 7B (Groq Free)";
+      case "openai/gpt-oss-20b":
+        return "GPT OSS 20B (Groq Free)";
+      case "openai/gpt-oss-120b":
+        return "GPT OSS 120B (Groq Free)";
+      case "groq/compound-mini":
+        return "Compound Mini (Groq Free)";
+      case "groq/compound":
+        return "Compound (Groq Free)";
+      case "qwen/qwen3.6-27b":
+        return "Qwen 3.6 27B (Groq Free)";
       case "hy3-free":
         return "HY3 (Free)";
       case "deepseek-v4-flash-free":
@@ -128,7 +136,7 @@ export function SettingsForm() {
       case "deepseek-v4-flash":
         return "DeepSeek v4 Flash (Paid API)";
       default:
-        return modelId || "Llama 3.1 8B (Free)";
+        return modelId || "ALLaM 2.0 7B (Free)";
     }
   }
 
@@ -274,7 +282,7 @@ export function SettingsForm() {
             <h2 style={{ fontSize: 13, margin: "0 0 12px 0", color: "var(--mx-text)" }}>AI Engine & Models</h2>
             <SelectField
               label="Active AI Model"
-              value={prefs.ai_model || "llama-3.1-8b-instant"}
+              value={prefs.ai_model || "allam-2-7b"}
               onChange={(e) => {
                 updatePref("ai_model", e.target.value);
                 setModelStatus(null);
@@ -282,8 +290,12 @@ export function SettingsForm() {
               }}
             >
               <optgroup label="Free Tier (Groq Cloud API - Fast LPU)">
-                <option value="llama-3.1-8b-instant">⚡ Llama 3.1 8B Instant (Recommended Default - Fast & Free)</option>
-                <option value="llama-3.3-70b-versatile">Meta Llama 3.3 70B Versatile (Free - Groq)</option>
+                <option value="allam-2-7b">⚡ ALLaM 2.0 7B (Recommended Default - Ultra Fast & Smallest)</option>
+                <option value="openai/gpt-oss-20b">GPT OSS 20B (Fast & High Context - OpenAI)</option>
+                <option value="openai/gpt-oss-120b">GPT OSS 120B (High Capability Flagship - OpenAI)</option>
+                <option value="groq/compound-mini">Compound Mini (Agentic - Groq)</option>
+                <option value="groq/compound">Compound (Agentic Flagship - Groq)</option>
+                <option value="qwen/qwen3.6-27b">Qwen 3.6 27B (Multimodal Vision/Text - Alibaba)</option>
               </optgroup>
               <optgroup label="Free Tier (OpenCode Zen API)">
                 <option value="hy3-free">HY3 (Free - Zen)</option>

@@ -99,7 +99,7 @@ const defaultPreferences: UserPreferences = {
   spam_blacklist: [],
   phishing_sensitivity: "default",
   phishing_allowlist: [],
-  ai_model: "llama-3.1-8b-instant",
+  ai_model: "allam-2-7b",
   thinking_mode: false,
   summary_length: "medium",
   custom_priority_rules: "",
