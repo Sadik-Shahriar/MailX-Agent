@@ -129,6 +129,9 @@ def resolve_provider_for_model(model_name: str | None) -> tuple[str, str, str, s
     if LLM_API_URL and LLM_API_URL not in (ZEN_API_URL, GROQ_API_URL, DEEPSEEK_API_URL, "https://api.deepseek.com/v1/chat/completions"):
         return "custom", LLM_API_URL, LLM_API_KEY, target
 
+    if target in ("llama-3.1-8b-instant", "llama-3.3-70b-versatile", "llama-3.1-70b-versatile", "gemma2-9b-it") or (target.startswith("llama-") and target not in GROQ_MODELS):
+        target = "allam-2-7b"
+
     if (
         target in GROQ_MODELS
         or target.startswith("openai/gpt-oss")

@@ -32,6 +32,9 @@ export function SettingsForm() {
     try {
       const data = await sendMessage({ type: "GET_PREFERENCES" });
       if (data) {
+        if (data.ai_model && (data.ai_model.includes("llama") || data.ai_model.includes("gemma"))) {
+          data.ai_model = "allam-2-7b";
+        }
         setPrefs(data);
         setOriginalPrefs(data);
       }
@@ -112,6 +115,10 @@ export function SettingsForm() {
   function formatModelLabel(modelId?: string): string {
     switch (modelId) {
       case "allam-2-7b":
+      case "llama-3.1-8b-instant":
+      case "llama-3.3-70b-versatile":
+      case "llama-3.1-70b-versatile":
+      case "gemma2-9b-it":
         return "ALLaM 2.0 7B (Groq Free)";
       case "openai/gpt-oss-20b":
         return "GPT OSS 20B (Groq Free)";
